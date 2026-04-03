@@ -1,7 +1,7 @@
 /**
  * 文档分析页面
  */
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { collectSseText, documentApi, getErrorMessage } from '../services/api';
 import { CloudArrowUpIcon, DocumentIcon } from '@heroicons/react/24/outline';
@@ -28,9 +28,22 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [localOverview, setLocalOverview] = useState(projectOverview);
-  const [localRequirements, setLocalRequirements] = useState(techRequirements);
-  
+  const [editingOverview, setEditingOverview] = useState(false);
+  const [editingRequirements, setEditingRequirements] = useState(false);
+  const [draftOverview, setDraftOverview] = useState(projectOverview);
+  const [draftRequirements, setDraftRequirements] = useState(techRequirements);
+
+  useEffect(() => {
+    if (!editingOverview) {
+      setDraftOverview(projectOverview);
+    }
+  }, [editingOverview, projectOverview]);
+
+  useEffect(() => {
+    if (!editingRequirements) {
+      setDraftRequirements(techRequirements);
+    }
+  }, [editingRequirements, techRequirements]);
 
   // 处理换行符的函数 - 只做基本转换
   const normalizeLineBreaks = (text: string) => {
@@ -151,7 +164,6 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
       );
 
       const finalOverview = normalizeLineBreaks(overviewResult);
-      setLocalOverview(finalOverview);
 
       // 第二步：分析技术评分要求
       setCurrentAnalysisStep('requirements');
@@ -169,9 +181,10 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
       );
 
       const finalRequirements = normalizeLineBreaks(requirementsResult);
-      setLocalRequirements(finalRequirements);
 
       // 完成后更新父组件状态
+      setEditingOverview(false);
+      setEditingRequirements(false);
       onAnalysisComplete(finalOverview, finalRequirements);
       setMessage({ type: 'success', text: '标书解析完成' });
       
@@ -188,6 +201,28 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
     } finally {
       setAnalyzing(false);
     }
+  };
+
+  const handleSaveOverview = () => {
+    onAnalysisComplete(draftOverview, techRequirements);
+    setEditingOverview(false);
+    setMessage({ type: 'success', text: '项目概述已保存' });
+  };
+
+  const handleCancelOverview = () => {
+    setDraftOverview(projectOverview);
+    setEditingOverview(false);
+  };
+
+  const handleSaveRequirements = () => {
+    onAnalysisComplete(projectOverview, draftRequirements);
+    setEditingRequirements(false);
+    setMessage({ type: 'success', text: '技术评分要求已保存' });
+  };
+
+  const handleCancelRequirements = () => {
+    setDraftRequirements(techRequirements);
+    setEditingRequirements(false);
   };
 
   return (
@@ -286,30 +321,116 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* 项目概述 */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">
-                项目概述
-              </label>
-              <div className="w-full p-4 border border-gray-300 rounded-lg focus-within:ring-blue-500 focus-within:border-blue-500 max-h-80 overflow-y-auto bg-white shadow-sm">
-                <div className="prose prose-sm max-w-none text-gray-800">
-                  <ReactMarkdown components={markdownComponents}>
-                    {localOverview || '项目概述将在这里显示...'}
-                  </ReactMarkdown>
-                </div>
+              <div className="flex items-center justify-between mb-3 gap-3">
+                <label className="block text-sm font-medium text-gray-700">
+                  项目概述
+                </label>
+                {!editingOverview && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDraftOverview(projectOverview);
+                      setEditingOverview(true);
+                    }}
+                    className="text-sm font-medium text-blue-600 hover:text-blue-700"
+                  >
+                    编辑
+                  </button>
+                )}
               </div>
+
+              {editingOverview ? (
+                <div className="space-y-3">
+                  <textarea
+                    value={draftOverview}
+                    onChange={(event) => setDraftOverview(event.target.value)}
+                    rows={14}
+                    className="w-full p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y"
+                    placeholder="项目概述将在这里显示..."
+                  />
+                  <div className="flex justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={handleCancelOverview}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveOverview}
+                      className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700"
+                    >
+                      保存
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="w-full p-4 border border-gray-300 rounded-lg max-h-80 overflow-y-auto bg-white shadow-sm">
+                  <div className="prose prose-sm max-w-none text-gray-800">
+                    <ReactMarkdown components={markdownComponents}>
+                      {projectOverview || '项目概述将在这里显示...'}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* 技术评分要求 */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">
-                技术评分要求
-              </label>
-              <div className="w-full p-4 border border-gray-300 rounded-lg focus-within:ring-green-500 focus-within:border-green-500 max-h-80 overflow-y-auto bg-white shadow-sm">
-                <div className="prose prose-sm max-w-none text-gray-800">
-                  <ReactMarkdown components={markdownComponents}>
-                    {localRequirements || '技术评分要求将在这里显示...'}
-                  </ReactMarkdown>
-                </div>
+              <div className="flex items-center justify-between mb-3 gap-3">
+                <label className="block text-sm font-medium text-gray-700">
+                  技术评分要求
+                </label>
+                {!editingRequirements && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDraftRequirements(techRequirements);
+                      setEditingRequirements(true);
+                    }}
+                    className="text-sm font-medium text-blue-600 hover:text-blue-700"
+                  >
+                    编辑
+                  </button>
+                )}
               </div>
+
+              {editingRequirements ? (
+                <div className="space-y-3">
+                  <textarea
+                    value={draftRequirements}
+                    onChange={(event) => setDraftRequirements(event.target.value)}
+                    rows={14}
+                    className="w-full p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 resize-y"
+                    placeholder="技术评分要求将在这里显示..."
+                  />
+                  <div className="flex justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={handleCancelRequirements}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveRequirements}
+                      className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700"
+                    >
+                      保存
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="w-full p-4 border border-gray-300 rounded-lg max-h-80 overflow-y-auto bg-white shadow-sm">
+                  <div className="prose prose-sm max-w-none text-gray-800">
+                    <ReactMarkdown components={markdownComponents}>
+                      {techRequirements || '技术评分要求将在这里显示...'}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
