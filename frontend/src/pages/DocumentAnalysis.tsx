@@ -7,6 +7,8 @@ import { collectSseText, documentApi, getErrorMessage } from '../services/api';
 import { CloudArrowUpIcon, DocumentIcon } from '@heroicons/react/24/outline';
 import { draftStorage } from '../utils/draftStorage';
 
+const STREAM_UPDATE_DELAY = 80;
+
 interface DocumentAnalysisProps {
   fileContent: string;
   projectOverview: string;
@@ -27,6 +29,8 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
   const [analyzing, setAnalyzing] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const streamFlushTimerRef = useRef<number | null>(null);
+  const pendingStreamingRef = useRef({ overview: '', requirements: '' });
 
   const [editingOverview, setEditingOverview] = useState(false);
   const [editingRequirements, setEditingRequirements] = useState(false);
@@ -60,6 +64,14 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
   const [streamingOverview, setStreamingOverview] = useState('');
   const [streamingRequirements, setStreamingRequirements] = useState('');
 
+  useEffect(() => {
+    return () => {
+      if (streamFlushTimerRef.current !== null) {
+        window.clearTimeout(streamFlushTimerRef.current);
+      }
+    };
+  }, []);
+
   // 公共的 ReactMarkdown 组件配置
   const markdownComponents = {
     p: ({ children }: any) => <p className="mb-3 leading-relaxed text-sm" style={{whiteSpace: 'pre-wrap', lineHeight: '1.5'}}>{children}</p>,
@@ -81,25 +93,32 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
     text: ({ children }: any) => <span style={{whiteSpace: 'pre-wrap'}}>{children}</span>,
   };
 
-  // 流式显示的紧凑样式配置
-  const streamingComponents = {
-    p: ({ children }: any) => <p className="mb-2 leading-tight text-xs text-blue-400" style={{whiteSpace: 'pre-wrap', lineHeight: '1.3'}}>{children}</p>,
-    ul: ({ children }: any) => <ul className="mb-2 pl-3 space-y-0.5 list-disc text-blue-400">{children}</ul>,
-    ol: ({ children }: any) => <ol className="mb-2 pl-3 space-y-0.5 list-decimal text-blue-400">{children}</ol>,
-    li: ({ children }: any) => <li className="text-xs leading-tight text-blue-400">{children}</li>,
-    h1: ({ children }: any) => <h1 className="text-sm font-semibold mb-2 text-blue-500 border-b border-blue-200 pb-1">{children}</h1>,
-    h2: ({ children }: any) => <h2 className="text-xs font-semibold mb-1.5 text-blue-500">{children}</h2>,
-    h3: ({ children }: any) => <h3 className="text-xs font-semibold mb-1 text-blue-400">{children}</h3>,
-    strong: ({ children }: any) => <strong className="font-semibold text-blue-500">{children}</strong>,
-    em: ({ children }: any) => <em className="italic text-blue-400">{children}</em>,
-    blockquote: ({ children }: any) => <blockquote className="border-l-2 border-blue-300 pl-2 my-1.5 italic text-blue-400">{children}</blockquote>,
-    code: ({ children }: any) => <code className="bg-blue-50 px-1 py-0.5 rounded text-xs font-mono text-blue-400">{children}</code>,
-    table: ({ children }: any) => <table className="w-full border-collapse border border-blue-200 my-2">{children}</table>,
-    thead: ({ children }: any) => <thead className="bg-blue-50">{children}</thead>,
-    th: ({ children }: any) => <th className="border border-blue-200 px-2 py-1 text-left font-semibold text-xs text-blue-500">{children}</th>,
-    td: ({ children }: any) => <td className="border border-blue-200 px-2 py-1 text-xs text-blue-400">{children}</td>,
-    br: () => <br className="my-0.5" />,
-    text: ({ children }: any) => <span className="text-blue-400" style={{whiteSpace: 'pre-wrap'}}>{children}</span>,
+  const flushStreamingPreview = () => {
+    if (streamFlushTimerRef.current !== null) {
+      window.clearTimeout(streamFlushTimerRef.current);
+      streamFlushTimerRef.current = null;
+    }
+
+    setStreamingOverview(normalizeLineBreaks(pendingStreamingRef.current.overview));
+    setStreamingRequirements(normalizeLineBreaks(pendingStreamingRef.current.requirements));
+  };
+
+  // 流式阶段只做节流后的纯文本预览，避免长内容反复 Markdown 渲染把页面拖慢。
+  const scheduleStreamingPreview = (step: 'overview' | 'requirements', fullText: string) => {
+    pendingStreamingRef.current[step] = fullText;
+
+    if (streamFlushTimerRef.current !== null) {
+      return;
+    }
+
+    streamFlushTimerRef.current = window.setTimeout(() => {
+      flushStreamingPreview();
+    }, STREAM_UPDATE_DELAY);
+  };
+
+  const resetStreamingPreview = () => {
+    pendingStreamingRef.current = { overview: '', requirements: '' };
+    flushStreamingPreview();
   };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -142,8 +161,7 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
     try {
       setAnalyzing(true);
       setMessage(null);
-      setStreamingOverview('');
-      setStreamingRequirements('');
+      resetStreamingPreview();
 
       let overviewResult = '';
       let requirementsResult = '';
@@ -158,11 +176,12 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
       overviewResult = await collectSseText(
         overviewResponse,
         (fullText) => {
-          setStreamingOverview(normalizeLineBreaks(fullText));
+          scheduleStreamingPreview('overview', fullText);
         },
         '项目概述解析失败'
       );
 
+      flushStreamingPreview();
       const finalOverview = normalizeLineBreaks(overviewResult);
 
       // 第二步：分析技术评分要求
@@ -175,11 +194,12 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
       requirementsResult = await collectSseText(
         requirementsResponse,
         (fullText) => {
-          setStreamingRequirements(normalizeLineBreaks(fullText));
+          scheduleStreamingPreview('requirements', fullText);
         },
         '技术评分要求解析失败'
       );
 
+      flushStreamingPreview();
       const finalRequirements = normalizeLineBreaks(requirementsResult);
 
       // 完成后更新父组件状态
@@ -189,14 +209,12 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
       setMessage({ type: 'success', text: '标书解析完成' });
       
       // 清空流式内容
-      setStreamingOverview('');
-      setStreamingRequirements('');
+      resetStreamingPreview();
       setCurrentAnalysisStep(null);
 
     } catch (error) {
       setMessage({ type: 'error', text: getErrorMessage(error, '标书解析失败') });
-      setStreamingOverview('');
-      setStreamingRequirements('');
+      resetStreamingPreview();
       setCurrentAnalysisStep(null);
     } finally {
       setAnalyzing(false);
@@ -285,7 +303,7 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
                   <div className="animate-spin -ml-1 mr-3 h-5 w-5 text-white">
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 714 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
                   </div>
                   {currentAnalysisStep === 'overview' ? '正在分析项目概述...' : 
@@ -308,11 +326,9 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
                 {currentAnalysisStep === 'overview' ? '正在分析项目概述...' : '正在分析技术评分要求...'}
               </h4>
               <div className="bg-white p-3 rounded-lg border border-gray-200 max-h-64 overflow-y-auto shadow-sm">
-                <div className="text-xs prose prose-sm max-w-none">
-                  <ReactMarkdown components={streamingComponents}>
-                    {currentAnalysisStep === 'overview' ? streamingOverview : streamingRequirements}
-                  </ReactMarkdown>
-                </div>
+                <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-blue-900 font-sans">
+                  {currentAnalysisStep === 'overview' ? streamingOverview : streamingRequirements}
+                </pre>
               </div>
             </div>
           )}
