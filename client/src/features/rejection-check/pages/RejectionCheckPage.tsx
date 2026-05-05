@@ -6,7 +6,7 @@ const checks = [
   '商务条款偏离',
 ];
 
-function RejectionCheck() {
+function RejectionCheckPage() {
   return (
     <div className="page-stack">
       <section className="hero-panel compact-hero">
@@ -37,4 +37,4 @@ function RejectionCheck() {
   );
 }
 
-export default RejectionCheck;
+export default RejectionCheckPage;

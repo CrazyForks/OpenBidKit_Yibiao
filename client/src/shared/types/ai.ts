@@ -1,0 +1,27 @@
+export type ChatRole = 'system' | 'user' | 'assistant';
+
+export interface ChatMessage {
+  role: ChatRole;
+  content: string;
+}
+
+export interface ChatRequestOptions {
+  temperature?: number;
+  response_format?: { type: 'json_object' };
+}
+
+export interface ChatCompletionRequest extends ChatRequestOptions {
+  messages: ChatMessage[];
+}
+
+export interface JsonCompletionRequest<TInput = unknown> extends ChatRequestOptions {
+  messages: ChatMessage[];
+  schemaName?: string;
+  input?: TInput;
+}
+
+export interface AiStreamEvent {
+  type: 'chunk' | 'progress' | 'error' | 'done';
+  chunk?: string;
+  message?: string;
+}

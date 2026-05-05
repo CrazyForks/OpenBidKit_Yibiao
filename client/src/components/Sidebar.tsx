@@ -1,47 +1,21 @@
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { useState, type ComponentType, type ReactElement, type SVGProps } from 'react';
-import type { SectionId } from '../App';
+import { appMenuItems } from '../app/menuConfig';
+import type { SectionId } from '../shared/types/navigation';
 import SettingsDialog from './SettingsDialog';
 import logoUrl from '../../assets/icon_256.png';
-
-interface NavigationItem {
-  id: SectionId;
-  label: string;
-  description: string;
-  icon: ComponentType<SVGProps<SVGSVGElement>>;
-}
 
 interface SidebarProps {
   activeSection: SectionId;
   onSectionChange: (section: SectionId) => void;
 }
 
-const navigationItems: NavigationItem[] = [
-  {
-    id: 'technical-plan',
-    label: '技术方案',
-    description: '方案生成与正文编排',
-    icon: DocumentIcon,
-  },
-  {
-    id: 'knowledge-base',
-    label: '知识库',
-    description: '素材、模板和案例资产',
-    icon: ArchiveIcon,
-  },
-  {
-    id: 'duplicate-check',
-    label: '标书查重',
-    description: '相似度与重复表达检测',
-    icon: CompareIcon,
-  },
-  {
-    id: 'rejection-check',
-    label: '废标项检查',
-    description: '硬性条款与响应完整性',
-    icon: ShieldIcon,
-  },
-];
+const navigationIcons: Record<SectionId, ComponentType<SVGProps<SVGSVGElement>>> = {
+  'technical-plan': DocumentIcon,
+  'knowledge-base': ArchiveIcon,
+  'duplicate-check': CompareIcon,
+  'rejection-check': ShieldIcon,
+};
 
 function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
@@ -70,8 +44,8 @@ function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
       </button>
 
       <nav className="sidebar-nav" aria-label="主菜单">
-        {navigationItems.map((item) => {
-          const Icon = item.icon;
+        {appMenuItems.map((item) => {
+          const Icon = navigationIcons[item.id];
           const isActive = item.id === activeSection;
           const button = (
             <button

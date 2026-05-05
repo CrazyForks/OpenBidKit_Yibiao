@@ -1,6 +1,6 @@
 import * as Tooltip from '@radix-ui/react-tooltip';
 import type { ReactNode } from 'react';
-import type { SectionId } from '../App';
+import type { SectionId } from '../shared/types/navigation';
 import Sidebar from './Sidebar';
 
 interface AppShellProps {

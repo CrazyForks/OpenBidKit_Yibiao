@@ -1,4 +1,4 @@
-function BidDuplicateCheck() {
+function DuplicateCheckPage() {
   return (
     <div className="page-stack">
       <section className="hero-panel compact-hero">
@@ -32,4 +32,4 @@ function BidDuplicateCheck() {
   );
 }
 
-export default BidDuplicateCheck;
+export default DuplicateCheckPage;

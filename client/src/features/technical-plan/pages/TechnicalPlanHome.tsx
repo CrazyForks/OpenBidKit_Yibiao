@@ -5,7 +5,7 @@ const stages = [
   { title: '导出交付文档', desc: '输出可继续编辑和归档的标书文件。' },
 ];
 
-function TechnicalPlan() {
+function TechnicalPlanHome() {
   return (
     <div className="page-stack">
       <section className="hero-panel technical-hero">
@@ -74,4 +74,4 @@ function TechnicalPlan() {
   );
 }
 
-export default TechnicalPlan;
+export default TechnicalPlanHome;

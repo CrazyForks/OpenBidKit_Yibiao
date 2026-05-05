@@ -1,6 +1,6 @@
 const knowledgeItems = ['企业资质', '项目案例', '技术组件', '标准章节'];
 
-function KnowledgeBase() {
+function KnowledgeBasePage() {
   return (
     <div className="page-stack">
       <section className="hero-panel compact-hero">
@@ -31,4 +31,4 @@ function KnowledgeBase() {
   );
 }
 
-export default KnowledgeBase;
+export default KnowledgeBasePage;

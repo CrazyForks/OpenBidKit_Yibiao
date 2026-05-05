@@ -1,6 +1,7 @@
 const { app, BrowserWindow, nativeTheme, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const { registerIpcHandlers } = require('./ipc/index.cjs');
 
 const rendererUrl = process.env.ELECTRON_RENDERER_URL;
 const iconPath = path.join(__dirname, '../assets/icon.ico');
@@ -39,6 +40,7 @@ function createMainWindow() {
 
 app.whenReady().then(() => {
   nativeTheme.themeSource = 'light';
+  registerIpcHandlers(app);
   createMainWindow();
 
   app.on('activate', () => {
