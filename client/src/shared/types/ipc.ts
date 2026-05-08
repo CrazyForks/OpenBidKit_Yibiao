@@ -23,9 +23,24 @@ export interface WordExportResult {
   warnings?: string[];
 }
 
+export interface LatestReleaseInfo {
+  version: string;
+  name: string;
+  body: string;
+  published_at: string;
+  html_url: string;
+}
+
 export interface YibiaoBridge {
   appName: string;
   platform: string;
+  getVersion: () => Promise<string>;
+  getLatestVersion: () => Promise<LatestReleaseInfo>;
+  startUpdate: () => Promise<void>;
+  quitAndInstall: () => Promise<void>;
+  onUpdateProgress: (callback: (event: { percent: number }) => void) => () => void;
+  onUpdateDownloaded: (callback: (event: { version: string }) => void) => () => void;
+  onUpdateError: (callback: (event: { message: string }) => void) => () => void;
   config: {
     load: () => Promise<ClientConfig>;
     save: (config: ClientConfig) => Promise<ConfigSaveResult>;

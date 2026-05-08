@@ -1,4 +1,4 @@
-const { dialog } = require('electron');
+const { dialog, shell } = require('electron');
 
 function formatReleaseNotes(releaseNotes) {
   if (!releaseNotes) {
@@ -15,12 +15,57 @@ function formatReleaseNotes(releaseNotes) {
   return String(releaseNotes);
 }
 
+let autoUpdaterInstance = null;
+
+function triggerUpdateDownload({ mainWindow, onProgress, onDownloaded, onError }) {
+  if (!autoUpdaterInstance) {
+    shell.openExternal('https://github.com/FB208/OpenBidKit_Yibiao/releases/latest');
+    return;
+  }
+
+  autoUpdaterInstance.removeAllListeners('download-progress');
+  autoUpdaterInstance.removeAllListeners('update-downloaded');
+  autoUpdaterInstance.removeAllListeners('error');
+
+  autoUpdaterInstance.on('download-progress', (progress) => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.setProgressBar(Math.max(0, Math.min(1, progress.percent / 100)));
+    }
+    onProgress?.(progress.percent);
+  });
+
+  autoUpdaterInstance.on('update-downloaded', (info) => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.setProgressBar(-1);
+    }
+    onDownloaded?.(info.version);
+  });
+
+  autoUpdaterInstance.on('error', (error) => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.setProgressBar(-1);
+    }
+    onError?.(error instanceof Error ? error.message : String(error));
+  });
+
+  autoUpdaterInstance.downloadUpdate().catch((error) => {
+    onError?.(error instanceof Error ? error.message : String(error));
+  });
+}
+
+function quitAndInstall() {
+  if (autoUpdaterInstance) {
+    autoUpdaterInstance.quitAndInstall(false, true);
+  }
+}
+
 function setupAutoUpdate({ app, mainWindow }) {
   if (!app.isPackaged) {
     return;
   }
 
   const { autoUpdater } = require('electron-updater');
+  autoUpdaterInstance = autoUpdater;
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
@@ -97,4 +142,4 @@ function setupAutoUpdate({ app, mainWindow }) {
   }, 3000);
 }
 
-module.exports = { setupAutoUpdate };
+module.exports = { setupAutoUpdate, triggerUpdateDownload, quitAndInstall };

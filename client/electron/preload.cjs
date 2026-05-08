@@ -5,6 +5,25 @@ let streamRequestId = 0;
 const bridge = {
   appName: '易标投标工具箱',
   platform: process.platform,
+  getVersion: () => ipcRenderer.invoke('app:get-version'),
+  getLatestVersion: () => ipcRenderer.invoke('app:get-latest-version'),
+  startUpdate: () => ipcRenderer.invoke('app:start-update'),
+  quitAndInstall: () => ipcRenderer.invoke('app:quit-and-install'),
+  onUpdateProgress: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('app:update-progress', listener);
+    return () => ipcRenderer.removeListener('app:update-progress', listener);
+  },
+  onUpdateDownloaded: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('app:update-downloaded', listener);
+    return () => ipcRenderer.removeListener('app:update-downloaded', listener);
+  },
+  onUpdateError: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('app:update-error', listener);
+    return () => ipcRenderer.removeListener('app:update-error', listener);
+  },
   config: {
     load: () => ipcRenderer.invoke('config:load'),
     save: (config) => ipcRenderer.invoke('config:save', config),
