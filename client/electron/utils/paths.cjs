@@ -20,6 +20,10 @@ function getGeneratedImagesDir(app) {
   return path.join(getWorkspaceDir(app), 'generated-images');
 }
 
+function getKnowledgeBaseDir(app) {
+  return path.join(getWorkspaceDir(app), 'knowledge-base');
+}
+
 function getAiLogsDir(app) {
   return path.join(getUserDataPath(app), 'logs', 'ai');
 }
@@ -28,6 +32,7 @@ module.exports = {
   getAiLogsDir,
   getConfigFilePath,
   getGeneratedImagesDir,
+  getKnowledgeBaseDir,
   getTechnicalPlanFilePath,
   getWorkspaceDir,
   getUserDataPath,
