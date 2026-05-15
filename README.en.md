@@ -92,7 +92,7 @@ Download the latest release from [GitHub Releases](https://github.com/yibiaoai/y
 ### 🎬 Usage Demo
 
 <a href="https://www.youtube.com/watch?v=9id3AJBQz8U">
-  <img src="https://img.youtube.com/vi/9id3AJBQz8U/maxresdefault.jpg" alt="Yibiao usage demo video" width="100%">
+  <img src="./screenshots/new_home.png" alt="Yibiao usage demo video" width="100%">
 </a>
 
 [Watch the usage demo on YouTube](https://www.youtube.com/watch?v=9id3AJBQz8U)

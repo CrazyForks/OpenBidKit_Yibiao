@@ -96,7 +96,7 @@
 ### 🎬 使用方式
 
 <a href="https://www.bilibili.com/video/BV1sC5i6SE74">
-  <img src="./screenshots/5.png" alt="易标使用演示视频" width="100%">
+  <img src="./screenshots/new_home.png" alt="易标使用演示视频" width="100%">
 </a>
 
 [点击前往 Bilibili 观看使用演示视频](https://www.bilibili.com/video/BV1sC5i6SE74)
