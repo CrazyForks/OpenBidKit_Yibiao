@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { trackConfigUsage } from '../../../shared/analytics/analytics';
 import { FloatingToolbar, useToast } from '../../../shared/ui';
 import type { FloatingToolbarGroup } from '../../../shared/ui';
 import type { ClientConfig, FileParserProvider, ImageModelConfig, ImageModelProvider, ImageModelStatus, LatestReleaseInfo } from '../../../shared/types';
@@ -256,6 +257,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
       if (result?.success) {
         setSavedConfig(config);
         onDeveloperModeChange?.(Boolean(config.developer_mode));
+        trackConfigUsage({}, config);
       }
       return Boolean(result?.success);
     } catch (error) {
@@ -329,6 +331,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
       await window.yibiao?.config.save(testedConfig);
       setState((prev) => ({ ...prev, imageModel: testedConfig.image_model }));
       setSavedConfig(testedConfig);
+      trackConfigUsage({}, testedConfig);
       const previewSrc = result?.image_url || (result?.image_data ? `data:${result.mime_type || 'image/png'};base64,${result.image_data}` : '');
 
       if (previewSrc) {
@@ -351,6 +354,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
       await window.yibiao?.config.save(failedConfig).catch(() => undefined);
       setState((prev) => ({ ...prev, imageModel: failedConfig.image_model }));
       setSavedConfig(failedConfig);
+      trackConfigUsage({}, failedConfig);
       showToast(message, 'error');
     } finally {
       setTestingImageModel(false);

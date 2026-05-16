@@ -1,6 +1,12 @@
 # Progress
 
 ## Session Log
+- 开始活跃留存与配置使用统计改造：已进入文件型计划，范围限定为客户端配置使用上报、Worker 汇总查询和 Dashboard 展示，不做任务漏斗/错误/耗时统计。
+- 已完成客户端埋点接入：`user_config.json` 新增 `analytics_created_at`；`analytics.ts` 支持 `config_usage`；应用启动、设置保存、生图测试、Step02/Step03/Step04 启动会按白名单上报配置枚举值。
+- 已完成 Worker 和 Dashboard 改造：Worker 支持 `config_usage`，新增 `/api/retention`、`/api/config-usage`，`summary` 增加活跃/新老客户端；Dashboard 增加活跃指标卡、留存概览、配置使用分布和最近事件分页。
+- 验证通过：`node --check analytics/worker/src/index.js`、`node --check client/electron/services/configStore.cjs`、Dashboard 内嵌脚本 `new Function` 语法检查、`cd client; npm run build`、本次改动文件 `git diff --check`。构建仍只有既有 chunk 体积警告，diff check 仍只有 LF/CRLF 提示。
+- 已修复代码评审提出的旧匿名客户端 ID 迁移问题：`analytics.ts` 会读取旧 `localStorage.analytics_client_id`，优先用旧 ID 覆盖并保存到 `user_config.json`；当前埋点也直接使用旧 ID。验证通过 `cd client; npm run build` 和 `git diff --check -- client/src/shared/analytics/analytics.ts`。
+- 已修复代码评审提出的 `/api/latest` 分页总数采样口径问题：分页 total 改用 `COUNT()`，与 `LIMIT/OFFSET` 明细行数一致，不再用 `SUM(_sample_interval)` 估算事件数。验证通过 `node --check analytics/worker/src/index.js` 和 `git diff --check -- analytics/worker/src/index.js`。
 - 已初始化文件型计划，用于跟踪导入招标文件页面重做任务。
 - 已查看客户端导入页、现有文件解析服务、配置存储和工具目录概览，确认需要重做 UI 并重写解析服务分流。
 - 已细读 doc2markdown-node、MinerU Agent、MinerU 精准 API demo 的关键流程，下一步迁入/复用解析逻辑。

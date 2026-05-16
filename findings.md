@@ -1,6 +1,10 @@
 # Findings
 
 ## Research Log
+- 本轮统计扩展只做“活跃与留存”和“配置使用情况”。现有 Analytics Engine blob1-blob7 已用于 project/event/page/version/platform/arch/clientId；可从 blob8 起扩展 `clientCreatedAt` 和配置枚举字段，保持旧数据兼容。
+- 客户端现有 `analytics.ts` 只支持 `app_open/page_view`，并从 `user_config` 读取 `analytics_client_id`；可继续通过 `window.yibiao.config.load()` 读取 `analytics_created_at` 和配置项。
+- Dashboard 当前仍按旧 `/api/latest?limit=50` 调用，Worker 已改为分页 `page/pageSize=10`，需要同步页面分页控件。
+- 留存查询使用 `blob8` 的 `analytics_created_at` 作为 cohort 日期；为兼容旧事件和异常空值，SQL 中使用 `toDateOrNull(blob8)`，旧数据不会进入留存口径但仍可进入总客户端/活跃客户端。
 - 当前客户端 `DocumentAnalysisPage` 仍是“导入文件 + AI 解析项目概述/评分要求”的旧交互，导入后没有 Markdown 渲染原始提取内容。
 - 当前 `client/electron/services/fileService.cjs` 只用 `mammoth.extractRawText` 和 `pdf-parse` 做纯文本提取，未按配置中的 `file_parser.provider` 分流，也未使用 `tools/doc2markdown-node` 的 Markdown 还原逻辑。
 - 配置文件中 `file_parser.provider` 已存在，值为 `local`、`mineru-accurate-api`、`mineru-agent-api`，但文件解析服务没有读取配置。

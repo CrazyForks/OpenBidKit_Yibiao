@@ -1,6 +1,17 @@
 const DATASET = 'agnet_analytics';
-const ALLOWED_EVENTS = new Set(['app_open', 'page_view']);
+const ALLOWED_EVENTS = new Set(['app_open', 'page_view', 'config_usage']);
 const PROJECT_NAME_PATTERN = /^[a-zA-Z0-9._-]{1,80}$/;
+const CONFIG_USAGE_FIELDS = [
+  { key: 'fileParserProviders', blob: 'blob9' },
+  { key: 'realTimeRender', blob: 'blob10' },
+  { key: 'imageProviders', blob: 'blob11' },
+  { key: 'imageModelStatuses', blob: 'blob12' },
+  { key: 'bidAnalysisModes', blob: 'blob13' },
+  { key: 'outlineModes', blob: 'blob14' },
+  { key: 'tableRequirements', blob: 'blob15' },
+  { key: 'useMermaidImages', blob: 'blob16' },
+  { key: 'useAiImages', blob: 'blob17' },
+];
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,6 +34,12 @@ function normalizeText(value, maxLength) {
   return String(value || '').trim().slice(0, maxLength);
 }
 
+function normalizeMetricValue(value, maxLength) {
+  if (value === true) return 'true';
+  if (value === false) return 'false';
+  return normalizeText(value, maxLength);
+}
+
 function isValidProjectName(projectName) {
   return PROJECT_NAME_PATTERN.test(projectName);
 }
@@ -39,10 +56,10 @@ function safeDays(value) {
   return Math.max(1, Math.min(Math.floor(days), 90));
 }
 
-function safeLimit(value) {
-  const limit = Number(value || 50);
-  if (!Number.isFinite(limit)) return 50;
-  return Math.max(1, Math.min(Math.floor(limit), 100));
+function safePage(value) {
+  const page = Number(value || 1);
+  if (!Number.isFinite(page)) return 1;
+  return Math.max(1, Math.floor(page));
 }
 
 function sqlString(value) {
@@ -98,6 +115,14 @@ export default {
       return handleLatest(request, env, url);
     }
 
+    if (url.pathname === '/api/retention') {
+      return handleRetention(request, env, url);
+    }
+
+    if (url.pathname === '/api/config-usage') {
+      return handleConfigUsage(request, env, url);
+    }
+
     return json({ code: 404, message: 'not found' }, { status: 404 });
   },
 };
@@ -116,6 +141,16 @@ async function handleTrack(request, env) {
     const platform = normalizeText(body.platform, 50);
     const arch = normalizeText(body.arch, 50);
     const clientId = normalizeText(body.client_id || body.clientId, 120);
+    const clientCreatedAt = normalizeText(body.client_created_at || body.clientCreatedAt, 20);
+    const fileParserProvider = normalizeText(body.file_parser_provider || body.fileParserProvider, 50);
+    const realTimeRender = normalizeMetricValue(body.real_time_render ?? body.realTimeRender, 20);
+    const imageProvider = normalizeText(body.image_provider || body.imageProvider, 50);
+    const imageModelStatus = normalizeText(body.image_model_status || body.imageModelStatus, 50);
+    const bidAnalysisMode = normalizeText(body.bid_analysis_mode || body.bidAnalysisMode, 50);
+    const outlineMode = normalizeText(body.outline_mode || body.outlineMode, 50);
+    const tableRequirement = normalizeText(body.table_requirement || body.tableRequirement, 50);
+    const useMermaidImages = normalizeMetricValue(body.use_mermaid_images ?? body.useMermaidImages, 20);
+    const useAiImages = normalizeMetricValue(body.use_ai_images ?? body.useAiImages, 20);
 
     if (!isValidProjectName(projectName)) {
       return json({ code: 400, message: 'invalid projectName' }, { status: 400 });
@@ -130,7 +165,25 @@ async function handleTrack(request, env) {
     }
 
     env.ANALYTICS.writeDataPoint({
-      blobs: [projectName, event, page, version, platform, arch, clientId],
+      blobs: [
+        projectName,
+        event,
+        page,
+        version,
+        platform,
+        arch,
+        clientId,
+        clientCreatedAt,
+        fileParserProvider,
+        realTimeRender,
+        imageProvider,
+        imageModelStatus,
+        bidAnalysisMode,
+        outlineMode,
+        tableRequirement,
+        useMermaidImages,
+        useAiImages,
+      ],
       doubles: [1],
       indexes: [projectName],
     });
@@ -222,21 +275,43 @@ async function handleSummary(request, env, url) {
       AND blob4 != ''
       AND timestamp >= NOW() - INTERVAL '${days}' DAY
     GROUP BY version
-    ORDER BY count DESC
+    ORDER BY version DESC
     LIMIT 50
   `;
 
+  const clientsSql = `
+    SELECT
+      COUNT(DISTINCT blob7) AS totalClients,
+      COUNT(DISTINCT IF(toDate(timestamp) = toDate(NOW()), blob7, NULL)) AS todayActiveClients,
+      COUNT(DISTINCT IF(timestamp >= NOW() - INTERVAL '7' DAY, blob7, NULL)) AS wau,
+      COUNT(DISTINCT IF(timestamp >= NOW() - INTERVAL '30' DAY, blob7, NULL)) AS mau,
+      COUNT(DISTINCT IF(timestamp >= NOW() - INTERVAL '${days}' DAY, blob7, NULL)) AS activeClients,
+      COUNT(DISTINCT IF(timestamp >= NOW() - INTERVAL '${days}' DAY AND blob8 != '' AND toDateOrNull(blob8) >= toDate(NOW() - INTERVAL '${days}' DAY), blob7, NULL)) AS newClients
+    FROM ${DATASET}
+    WHERE blob1 = ${project}
+      AND blob7 != ''
+  `;
+
   try {
-    const [daily, pages, versions] = await Promise.all([
+    const [daily, pages, versions, clients] = await Promise.all([
       queryAnalytics(env, dailySql),
       queryAnalytics(env, pagesSql),
       queryAnalytics(env, versionsSql),
+      queryAnalytics(env, clientsSql),
     ]);
+    const clientStats = clients.data?.[0] || {};
 
     return json({
       code: 0,
       projectName,
       days,
+      totalClients: Number(clientStats.totalClients || 0),
+      todayActiveClients: Number(clientStats.todayActiveClients || 0),
+      wau: Number(clientStats.wau || 0),
+      mau: Number(clientStats.mau || 0),
+      activeClients: Number(clientStats.activeClients || 0),
+      newClients: Number(clientStats.newClients || 0),
+      returningClients: Math.max(0, Number(clientStats.activeClients || 0) - Number(clientStats.newClients || 0)),
       daily: daily.data || [],
       pages: pages.data || [],
       versions: versions.data || [],
@@ -256,11 +331,22 @@ async function handleLatest(request, env, url) {
   }
 
   const projectName = normalizeText(url.searchParams.get('projectName'), 80);
-  const limit = safeLimit(url.searchParams.get('limit'));
+  const page = safePage(url.searchParams.get('page'));
+  const pageSize = 10;
+  const offset = (page - 1) * pageSize;
 
   if (!isValidProjectName(projectName)) {
     return json({ code: 400, message: 'invalid projectName' }, { status: 400 });
   }
+
+  const project = sqlString(projectName);
+
+  const totalSql = `
+    SELECT
+      COUNT() AS total
+    FROM ${DATASET}
+    WHERE blob1 = ${project}
+  `;
 
   const sql = `
     SELECT
@@ -271,18 +357,139 @@ async function handleLatest(request, env, url) {
       blob4 AS version,
       blob5 AS platform,
       blob6 AS arch,
-      blob7 AS clientId
+      blob7 AS clientId,
+      blob8 AS clientCreatedAt
     FROM ${DATASET}
-    WHERE blob1 = ${sqlString(projectName)}
+    WHERE blob1 = ${project}
     ORDER BY timestamp DESC
-    LIMIT ${limit}
+    LIMIT ${pageSize} OFFSET ${offset}
   `;
 
   try {
-    const latest = await queryAnalytics(env, sql);
+    const [latest, total] = await Promise.all([
+      queryAnalytics(env, sql),
+      queryAnalytics(env, totalSql),
+    ]);
     return json({
       code: 0,
+      page,
+      pageSize,
+      total: Number(total.data?.[0]?.total || 0),
       events: latest.data || [],
+    });
+  } catch {
+    return json({ code: 500, message: 'query failed' }, { status: 500 });
+  }
+}
+
+async function handleRetention(request, env, url) {
+  if (request.method !== 'GET') {
+    return json({ code: 405, message: 'method not allowed' }, { status: 405 });
+  }
+
+  if (!requireAdmin(request, env)) {
+    return json({ code: 401, message: 'unauthorized' }, { status: 401 });
+  }
+
+  const projectName = normalizeText(url.searchParams.get('projectName'), 80);
+  const days = safeDays(url.searchParams.get('days'));
+
+  if (!isValidProjectName(projectName)) {
+    return json({ code: 400, message: 'invalid projectName' }, { status: 400 });
+  }
+
+  const project = sqlString(projectName);
+  const sql = `
+    SELECT
+      COUNT(DISTINCT IF(dateDiff('day', toDateOrNull(blob8), toDate(NOW())) BETWEEN 1 AND ${days}, blob7, NULL)) AS d1CohortClients,
+      COUNT(DISTINCT IF(dateDiff('day', toDateOrNull(blob8), toDate(NOW())) BETWEEN 1 AND ${days} AND dateDiff('day', toDateOrNull(blob8), toDate(timestamp)) = 1, blob7, NULL)) AS d1RetainedClients,
+      COUNT(DISTINCT IF(dateDiff('day', toDateOrNull(blob8), toDate(NOW())) BETWEEN 3 AND ${days}, blob7, NULL)) AS d3CohortClients,
+      COUNT(DISTINCT IF(dateDiff('day', toDateOrNull(blob8), toDate(NOW())) BETWEEN 3 AND ${days} AND dateDiff('day', toDateOrNull(blob8), toDate(timestamp)) = 3, blob7, NULL)) AS d3RetainedClients,
+      COUNT(DISTINCT IF(dateDiff('day', toDateOrNull(blob8), toDate(NOW())) BETWEEN 7 AND ${days}, blob7, NULL)) AS d7CohortClients,
+      COUNT(DISTINCT IF(dateDiff('day', toDateOrNull(blob8), toDate(NOW())) BETWEEN 7 AND ${days} AND dateDiff('day', toDateOrNull(blob8), toDate(timestamp)) = 7, blob7, NULL)) AS d7RetainedClients
+    FROM ${DATASET}
+    WHERE blob1 = ${project}
+      AND blob2 = 'app_open'
+      AND blob7 != ''
+      AND blob8 != ''
+  `;
+
+  try {
+    const result = await queryAnalytics(env, sql);
+    const stats = result.data?.[0] || {};
+    const buildRow = (day, cohortKey, retainedKey) => {
+      const cohortClients = Number(stats[cohortKey] || 0);
+      const retainedClients = Number(stats[retainedKey] || 0);
+      return {
+        day,
+        cohortClients,
+        retainedClients,
+        retentionRate: cohortClients > 0 ? retainedClients / cohortClients : 0,
+      };
+    };
+
+    return json({
+      code: 0,
+      projectName,
+      days,
+      retention: [
+        buildRow('D1', 'd1CohortClients', 'd1RetainedClients'),
+        buildRow('D3', 'd3CohortClients', 'd3RetainedClients'),
+        buildRow('D7', 'd7CohortClients', 'd7RetainedClients'),
+      ],
+    });
+  } catch {
+    return json({ code: 500, message: 'query failed' }, { status: 500 });
+  }
+}
+
+function buildConfigUsageSql(project, days, field) {
+  return `
+    SELECT
+      ${field.blob} AS value,
+      COUNT(DISTINCT blob7) AS clients,
+      SUM(_sample_interval) AS events
+    FROM ${DATASET}
+    WHERE blob1 = ${project}
+      AND blob2 = 'config_usage'
+      AND ${field.blob} != ''
+      AND timestamp >= NOW() - INTERVAL '${days}' DAY
+    GROUP BY value
+    ORDER BY clients DESC, events DESC, value ASC
+    LIMIT 50
+  `;
+}
+
+async function handleConfigUsage(request, env, url) {
+  if (request.method !== 'GET') {
+    return json({ code: 405, message: 'method not allowed' }, { status: 405 });
+  }
+
+  if (!requireAdmin(request, env)) {
+    return json({ code: 401, message: 'unauthorized' }, { status: 401 });
+  }
+
+  const projectName = normalizeText(url.searchParams.get('projectName'), 80);
+  const days = safeDays(url.searchParams.get('days'));
+
+  if (!isValidProjectName(projectName)) {
+    return json({ code: 400, message: 'invalid projectName' }, { status: 400 });
+  }
+
+  const project = sqlString(projectName);
+
+  try {
+    const results = await Promise.all(CONFIG_USAGE_FIELDS.map((field) => queryAnalytics(env, buildConfigUsageSql(project, days, field))));
+    const usage = {};
+    CONFIG_USAGE_FIELDS.forEach((field, index) => {
+      usage[field.key] = results[index].data || [];
+    });
+
+    return json({
+      code: 0,
+      projectName,
+      days,
+      usage,
     });
   } catch {
     return json({ code: 500, message: 'query failed' }, { status: 500 });

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
+import { trackConfigUsage } from '../../../shared/analytics/analytics';
 import { getBidAnalysisTasks } from '../services/bidAnalysisWorkflow';
 import { useToast } from '../../../shared/ui';
 import type { BackgroundTaskState, BidAnalysisMode, BidAnalysisTasks, BidAnalysisTaskState } from '../types';
@@ -202,6 +203,7 @@ function BidAnalysisPage({
       const config = await window.yibiao?.config.load();
       const shouldRealTimeRender = config?.real_time_render === true;
       await window.yibiao?.tasks.startBidAnalysis({ mode, fileContent, real_time_render: shouldRealTimeRender });
+      trackConfigUsage({ bid_analysis_mode: mode }, config);
       showToast('招标文件解析任务已在后台启动', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : '启动解析任务失败', 'error');

@@ -5,6 +5,7 @@ import { Children, isValidElement, memo, useCallback, useEffect, useMemo, useRef
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
+import { trackConfigUsage } from '../../../shared/analytics/analytics';
 import { useToast } from '../../../shared/ui';
 import type { ImageModelStatus, OutlineData, OutlineItem } from '../../../shared/types';
 import type { BackgroundTaskState, ContentGenerationOptions, ContentGenerationSectionStatus, ContentGenerationSections, ContentImageStats, ContentTableRequirement } from '../types';
@@ -473,6 +474,11 @@ function ContentEditPage({
         },
         real_time_render: shouldRealTimeRender,
       });
+      trackConfigUsage({
+        table_requirement: savedGenerationOptions.tableRequirement,
+        use_mermaid_images: savedGenerationOptions.useMermaidImages,
+        use_ai_images: nextImageModelAvailable && savedGenerationOptions.useAiImages,
+      }, config);
       setGenerationDialogOpen(false);
       showToast(regenerate ? '正文重新生成任务已在后台启动' : '正文生成任务已在后台启动', 'success');
     } catch (error) {
@@ -507,6 +513,11 @@ function ContentEditPage({
         },
         real_time_render: shouldRealTimeRender,
       });
+      trackConfigUsage({
+        table_requirement: savedGenerationOptions.tableRequirement,
+        use_mermaid_images: savedGenerationOptions.useMermaidImages,
+        use_ai_images: nextImageModelAvailable && savedGenerationOptions.useAiImages,
+      }, config);
       setSelectedItemId(requirementItem.id);
       setRequirementItem(null);
       setRegenerateRequirement('');

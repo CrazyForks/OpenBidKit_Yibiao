@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import AppRouter from './app/AppRouter';
 import { buildToolbarGroups } from './app/toolbarConfig';
 import AppShell from './components/AppShell';
-import { trackAppOpen, trackPageView } from './shared/analytics/analytics';
+import { trackAppOpen, trackConfigUsage, trackPageView } from './shared/analytics/analytics';
 import { FloatingToolbar } from './shared/ui';
 import type { SectionId } from './shared/types/navigation';
 
@@ -15,7 +15,10 @@ function App() {
     trackAppOpen();
 
     void window.yibiao?.config.load()
-      .then((config) => setDeveloperMode(Boolean(config?.developer_mode)))
+      .then((config) => {
+        setDeveloperMode(Boolean(config?.developer_mode));
+        trackConfigUsage({}, config);
+      })
       .catch((error) => console.warn('读取开发者模式失败', error));
   }, []);
 

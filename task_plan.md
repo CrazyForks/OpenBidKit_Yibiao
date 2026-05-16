@@ -617,6 +617,27 @@
 ### Errors Encountered
 | Error | Attempt | Resolution |
 | --- | --- | --- |
+
+## Current Task: 活跃留存与配置使用统计
+
+### Goal
+只补充两类统计：活跃与留存、配置使用情况。客户端异步上报匿名配置状态，不采集 API Key、Base URL、模型名、文件名、路径、文档内容或生成内容；统计页展示活跃客户端、留存概览和配置分布。
+
+### Phases
+- [completed] 1. 扩展客户端配置和埋点封装：`analytics_created_at`、`config_usage`、配置字段白名单。
+- [completed] 2. 在设置保存、Step02、Step03、Step04 启动点接入配置使用上报。
+- [completed] 3. 扩展 Worker `/track`、`/api/summary`，新增 `/api/retention` 与 `/api/config-usage`。
+- [completed] 4. 更新 Dashboard 展示活跃指标、留存概览、配置使用分布和最近事件分页。
+- [completed] 5. 运行 Worker 语法检查、客户端构建和空白检查。
+
+### Decisions
+- `client_id` 和 `analytics_created_at` 都存入 Electron `userData/user_config.json`。
+- 配置使用事件只记录枚举值和布尔值，不记录任何用户内容或密钥。
+- 留存基于 `analytics_created_at` cohort 和 `app_open` 活跃事件计算；缺少创建日期的旧事件不参与留存。
+
+### Errors Encountered
+| Error | Attempt | Resolution |
+| --- | --- | --- |
 | PowerShell 中首次 `node -e` smoke test 使用外层单引号导致传给 Node 的 JS 字符串引号被剥离 | 第一次 smoke test | 改用外层双引号、JS 字符串使用单引号后重跑通过 |
 
 ## Current Task: Step04 正文生成阶段应用知识库
