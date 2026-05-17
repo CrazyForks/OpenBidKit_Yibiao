@@ -1,10 +1,7 @@
 import { useMemo, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import rehypeRaw from 'rehype-raw';
-import remarkGfm from 'remark-gfm';
 import { trackConfigUsage } from '../../../shared/analytics/analytics';
 import { getBidAnalysisTasks } from '../services/bidAnalysisWorkflow';
-import { useToast } from '../../../shared/ui';
+import { MarkdownRenderer, useToast } from '../../../shared/ui';
 import type { BackgroundTaskState, BidAnalysisMode, BidAnalysisTasks, BidAnalysisTaskState } from '../types';
 
 interface BidAnalysisPageProps {
@@ -125,9 +122,9 @@ function JsonResultTable({ content }: { content: string }) {
   if (!data) {
     return (
       <div className="markdown-viewer bid-analysis-output">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+        <MarkdownRenderer>
           {`\`\`\`json\n${content}\n\`\`\``}
-        </ReactMarkdown>
+        </MarkdownRenderer>
       </div>
     );
   }
@@ -325,9 +322,9 @@ function BidAnalysisPage({
               <JsonResultTable content={activeTaskContent} />
             ) : (
               <div className="markdown-viewer bid-analysis-output">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+                <MarkdownRenderer>
                   {activeTaskContent}
-                </ReactMarkdown>
+                </MarkdownRenderer>
               </div>
             )
           ) : (

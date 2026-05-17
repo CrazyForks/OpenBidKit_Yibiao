@@ -1,8 +1,5 @@
 import { useEffect, useState } from 'react';
-import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
-import rehypeRaw from 'rehype-raw';
-import remarkGfm from 'remark-gfm';
-import { useToast } from '../../../shared/ui';
+import { MarkdownRenderer, useToast } from '../../../shared/ui';
 import type { FileParserProvider } from '../../../shared/types';
 
 const parserLabels: Record<FileParserProvider, string> = {
@@ -10,10 +7,6 @@ const parserLabels: Record<FileParserProvider, string> = {
   'mineru-accurate-api': 'MinerU 精准解析 API',
   'mineru-agent-api': 'MinerU-Agent 轻量解析 API',
 };
-
-function markdownUrlTransform(value: string) {
-  return value.startsWith('yibiao-asset://') ? value : defaultUrlTransform(value);
-}
 
 interface DocumentAnalysisPageProps {
   fileName: string;
@@ -101,9 +94,9 @@ function DocumentAnalysisPage({
 
         {fileContent ? (
           <div className="markdown-viewer">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} urlTransform={markdownUrlTransform}>
+            <MarkdownRenderer>
               {fileContent}
-            </ReactMarkdown>
+            </MarkdownRenderer>
           </div>
         ) : (
           <div className="markdown-empty-state">

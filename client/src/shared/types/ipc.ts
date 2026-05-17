@@ -46,6 +46,7 @@ export interface YibiaoBridge {
   platform: string;
   getVersion: () => Promise<string>;
   getLatestVersion: () => Promise<LatestReleaseInfo>;
+  openExternal: (url: string) => Promise<{ success: boolean; message?: string }>;
   checkUpdate: () => Promise<UpdateCheckResult>;
   startUpdate: () => Promise<UpdateCheckResult>;
   quitAndInstall: () => Promise<void>;

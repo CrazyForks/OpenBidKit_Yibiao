@@ -1,4 +1,4 @@
-const { ipcMain } = require('electron');
+const { ipcMain, shell } = require('electron');
 const https = require('node:https');
 const { registerAiIpc } = require('./aiIpc.cjs');
 const { registerConfigIpc } = require('./configIpc.cjs');
@@ -14,6 +14,19 @@ const { createFileService } = require('../services/fileService.cjs');
 const { createKnowledgeBaseService } = require('../services/knowledgeBaseService.cjs');
 const { createTaskService } = require('../services/taskService.cjs');
 const { createWorkspaceStore } = require('../services/workspaceStore.cjs');
+
+function normalizeExternalUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const candidate = /^www\./i.test(raw) ? `https://${raw}` : raw;
+
+  try {
+    const url = new URL(candidate);
+    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
 function registerIpcHandlers({ app, mainWindow, checkAndDownloadUpdate, triggerUpdateDownload, quitAndInstall }) {
   const configStore = createConfigStore(app);
@@ -33,6 +46,15 @@ function registerIpcHandlers({ app, mainWindow, checkAndDownloadUpdate, triggerU
   registerTaskIpc({ taskService });
 
   ipcMain.handle('app:get-version', () => app.getVersion());
+
+  ipcMain.handle('app:open-external', async (_event, url) => {
+    const externalUrl = normalizeExternalUrl(url);
+    if (!externalUrl) {
+      return { success: false, message: '不支持的外部链接' };
+    }
+    await shell.openExternal(externalUrl);
+    return { success: true };
+  });
 
   ipcMain.handle('app:get-latest-version', () => {
     return new Promise((resolve, reject) => {

@@ -2,11 +2,9 @@ import * as Dialog from '@radix-ui/react-dialog';
 import * as Popover from '@radix-ui/react-popover';
 import * as Switch from '@radix-ui/react-switch';
 import { Children, isValidElement, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
-import rehypeRaw from 'rehype-raw';
-import remarkGfm from 'remark-gfm';
+import type { Components } from 'react-markdown';
 import { trackConfigUsage } from '../../../shared/analytics/analytics';
-import { useToast } from '../../../shared/ui';
+import { MarkdownRenderer, useToast } from '../../../shared/ui';
 import type { ImageModelStatus, OutlineData, OutlineItem } from '../../../shared/types';
 import type { BackgroundTaskState, ContentGenerationOptions, ContentGenerationSectionStatus, ContentGenerationSections, ContentImageStats, ContentTableRequirement } from '../types';
 
@@ -89,10 +87,6 @@ const emptyImageStats: ContentImageStats = { planned: 0, attempted: 0, success: 
 
 function normalizeImageStats(stats?: Partial<ContentImageStats>): ContentImageStats {
   return { ...emptyImageStats, ...(stats || {}) };
-}
-
-function markdownUrlTransform(value: string) {
-  return value.startsWith('yibiao-asset://') ? value : defaultUrlTransform(value);
 }
 
 function collectLeafItems(items: OutlineItem[]): OutlineItem[] {
@@ -297,9 +291,9 @@ const MarkdownContent = memo(function MarkdownContent({ content, onPreviewImage 
   }), [onPreviewImage]);
 
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} urlTransform={markdownUrlTransform} components={markdownComponents}>
+    <MarkdownRenderer components={markdownComponents}>
       {content}
-    </ReactMarkdown>
+    </MarkdownRenderer>
   );
 });
 

@@ -8,6 +8,7 @@ const { getGeneratedImagesDir, getImportedImagesDir } = require('./utils/paths.c
 
 const rendererUrl = process.env.ELECTRON_RENDERER_URL;
 const iconPath = path.join(__dirname, '../assets/icon.ico');
+const packagedIndexUrl = pathToFileURL(path.join(__dirname, '../dist/index.html')).toString();
 
 protocol.registerSchemesAsPrivileged([{
   scheme: 'yibiao-asset',
@@ -49,6 +50,38 @@ function registerAssetProtocol() {
   });
 }
 
+function normalizeExternalUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const candidate = /^www\./i.test(raw) ? `https://${raw}` : raw;
+
+  try {
+    const url = new URL(candidate);
+    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function isAllowedAppNavigation(value) {
+  try {
+    const url = new URL(value);
+    if (rendererUrl) {
+      return url.origin === new URL(rendererUrl).origin;
+    }
+
+    const indexUrl = new URL(packagedIndexUrl);
+    return url.protocol === 'file:' && url.pathname === indexUrl.pathname;
+  } catch {
+    return false;
+  }
+}
+
+function openExternalUrl(value) {
+  const externalUrl = normalizeExternalUrl(value);
+  return externalUrl ? shell.openExternal(externalUrl) : Promise.resolve();
+}
+
 function createMainWindow() {
   const mainWindow = new BrowserWindow({
     width: 1440,
@@ -76,8 +109,17 @@ function createMainWindow() {
   }
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    void openExternalUrl(url);
     return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (isAllowedAppNavigation(url)) {
+      return;
+    }
+
+    event.preventDefault();
+    void openExternalUrl(url);
   });
 
   return mainWindow;

@@ -67,7 +67,10 @@ async function parseLocalDocument(filePath, options = {}) {
   }
 
   const { convertPathToMarkdown } = await import('./doc2markdown/convert.mjs');
-  return convertPathToMarkdown(filePath, { includeImages: options.preserveImages });
+  return convertPathToMarkdown(filePath, {
+    includeImages: options.preserveImages,
+    imageResolver: options.imageResolver,
+  });
 }
 
 function formatImportError(error) {
@@ -323,6 +326,11 @@ async function saveImportedImage(assets, buffer, sourceName, mime) {
   return `${assets.urlPrefix}/${encodeURIComponent(fileName)}`;
 }
 
+function createImageResolver(assets) {
+  if (!assets) return null;
+  return ({ buffer, mime, sourceName }) => saveImportedImage(assets, Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer), sourceName, mime);
+}
+
 function cleanMarkdownImageTarget(target) {
   const value = String(target || '').trim();
   return value.startsWith('<') && value.endsWith('>') ? value.slice(1, -1) : value;
@@ -428,21 +436,34 @@ async function resolveImageToAssetUrl(source, assets, context = {}) {
 }
 
 async function rewriteMarkdownImages(markdown, assets, context = {}) {
-  let result = String(markdown || '');
-  const markdownMatches = [...result.matchAll(markdownImagePattern)];
-  for (const match of markdownMatches) {
+  let result = await replaceMatchesAsync(String(markdown || ''), markdownImagePattern, async (match) => {
     const nextUrl = await resolveImageToAssetUrl(match.groups?.target || '', assets, context);
     const alt = match.groups?.alt || '';
     const title = match.groups?.title || '';
-    result = result.replace(match[0], nextUrl ? `![${alt}](${nextUrl}${title})` : '');
-  }
+    return nextUrl ? `![${alt}](${nextUrl}${title})` : '';
+  });
 
-  const htmlMatches = [...result.matchAll(htmlImageSrcPattern)];
-  for (const match of htmlMatches) {
+  result = await replaceMatchesAsync(result, htmlImageSrcPattern, async (match) => {
     const nextUrl = await resolveImageToAssetUrl(match.groups?.src || '', assets, context);
-    result = result.replace(match[0], nextUrl ? `${match[1]}${nextUrl}${match[3]}` : '');
-  }
+    return nextUrl ? `${match[1]}${nextUrl}${match[3]}` : '';
+  });
   return result;
+}
+
+async function replaceMatchesAsync(text, pattern, createReplacement) {
+  const matches = [...String(text || '').matchAll(pattern)];
+  if (!matches.length) return text;
+
+  const parts = [];
+  let lastIndex = 0;
+  for (const match of matches) {
+    const index = match.index ?? 0;
+    parts.push(text.slice(lastIndex, index));
+    parts.push(await createReplacement(match));
+    lastIndex = index + match[0].length;
+  }
+  parts.push(text.slice(lastIndex));
+  return parts.join('');
 }
 
 async function parseDocumentWithConfig(app, filePath, config, options = {}) {
@@ -453,7 +474,7 @@ async function parseDocumentWithConfig(app, filePath, config, options = {}) {
   const provider = parser.provider;
   const preserveImages = isPreserveImagesEnabled(config);
   const assets = preserveImages ? createAssetContext(app, options.assetScope || 'documents') : null;
-  const parseOptions = { preserveImages, assets };
+  const parseOptions = { preserveImages, assets, imageResolver: createImageResolver(assets) };
   let markdown = '';
   try {
     if (provider === 'mineru-agent-api') {
