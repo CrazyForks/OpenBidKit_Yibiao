@@ -93,23 +93,11 @@ function getTechnicalPlanLogsDir(app) {
   return getDeveloperLogsDir(app, 'technical-plan');
 }
 
-function getAgentRuntimeDir(app) {
-  return path.join(getUserDataPath(app), 'agent-runtime');
-}
-
-function getAgentCacheDir(app) {
-  return path.join(getUserDataPath(app), 'agent-cache');
-}
-
 function getPlatformArchKey() {
   return `${process.platform}-${process.arch}`;
 }
 
 function getBundledOpencodeBinaryPath(app) {
-  if (process.env.YIBIAO_OPENCODE_BIN) {
-    return process.env.YIBIAO_OPENCODE_BIN;
-  }
-
   const binaryName = process.platform === 'win32' ? 'opencode.exe' : 'opencode';
   const platformArch = getPlatformArchKey();
 
@@ -121,10 +109,6 @@ function getBundledOpencodeBinaryPath(app) {
 }
 
 function getBundledOpencodeToolsBinDir(app) {
-  if (process.env.YIBIAO_OPENCODE_TOOLS_BIN_DIR) {
-    return process.env.YIBIAO_OPENCODE_TOOLS_BIN_DIR;
-  }
-
   const platformArch = getPlatformArchKey();
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'opencode-tools', platformArch, 'bin');
@@ -134,8 +118,6 @@ function getBundledOpencodeToolsBinDir(app) {
 }
 
 module.exports = {
-  getAgentCacheDir,
-  getAgentRuntimeDir,
   getAiLogsDir,
   getBundledOpencodeBinaryPath,
   getBundledOpencodeToolsBinDir,

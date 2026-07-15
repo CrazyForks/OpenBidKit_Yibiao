@@ -1,9 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const {
-  getAgentRuntimeDir,
-  getBundledOpencodeToolsBinDir,
-} = require('../../utils/paths.cjs');
+const { getBundledOpencodeToolsBinDir } = require('../../utils/paths.cjs');
 
 const SHIM_COMMANDS = [
   'ls',
@@ -47,8 +44,12 @@ const AGENTS_MD_CONTENT = `# 易标 OpenCode 智能体工作区
 - 需要输出结果时，严格写入任务要求的输出文件。
 `;
 
-function getRuntimeToolsBinDir(app) {
-  return path.join(getAgentRuntimeDir(app), 'service', 'tools', 'bin');
+// 返回沙箱根目录内的动态命令垫片目录。
+function getRuntimeToolsBinDir(runtimeRoot) {
+  if (!runtimeRoot) {
+    throw new Error('缺少 OpenCode 沙箱运行根目录');
+  }
+  return path.join(runtimeRoot, 'tools', 'bin');
 }
 
 function quoteSh(value) {
@@ -86,9 +87,7 @@ function verifyBundledTools(bundledToolsBinDir) {
     if (!fs.existsSync(executablePath)) {
       throw new Error(`OpenCode 常用命令缺失：${executablePath}`);
     }
-    if (process.platform !== 'win32') {
-      try { fs.chmodSync(executablePath, 0o755); } catch {}
-    }
+    if (process.platform !== 'win32') fs.accessSync(executablePath, fs.constants.X_OK);
   });
 }
 
@@ -97,9 +96,9 @@ function writeNodeShim(binDir) {
     writeFileIfChanged(path.join(binDir, 'node.cmd'), [
       '@echo off',
       'setlocal',
-      'if "%YIBIAO_ELECTRON_NODE%"=="" set "YIBIAO_ELECTRON_NODE=node"',
+      'if "%YIBIAO_SANDBOX_NODE%"=="" exit /b 127',
       'set "ELECTRON_RUN_AS_NODE=1"',
-      '"%YIBIAO_ELECTRON_NODE%" %*',
+      '"%YIBIAO_SANDBOX_NODE%" %*',
       'exit /b %ERRORLEVEL%',
       '',
     ].join('\r\n'));
@@ -108,8 +107,8 @@ function writeNodeShim(binDir) {
 
   writeFileIfChanged(path.join(binDir, 'node'), [
     '#!/bin/sh',
-    ': "${YIBIAO_ELECTRON_NODE:=node}"',
-    'ELECTRON_RUN_AS_NODE=1 exec "$YIBIAO_ELECTRON_NODE" "$@"',
+    ': "${YIBIAO_SANDBOX_NODE:?missing YIBIAO_SANDBOX_NODE}"',
+    'exec "$YIBIAO_SANDBOX_NODE" "$@"',
     '',
   ].join('\n'), 0o755);
 }
@@ -119,9 +118,9 @@ function writeCommandShim(binDir, command, runnerPath) {
     writeFileIfChanged(path.join(binDir, `${command}.cmd`), [
       '@echo off',
       'setlocal',
-      'if "%YIBIAO_ELECTRON_NODE%"=="" set "YIBIAO_ELECTRON_NODE=node"',
+      'if "%YIBIAO_SANDBOX_NODE%"=="" exit /b 127',
       'set "ELECTRON_RUN_AS_NODE=1"',
-      `"%YIBIAO_ELECTRON_NODE%" "${runnerPath}" "${command}" %*`,
+      `"%YIBIAO_SANDBOX_NODE%" "${runnerPath}" "${command}" %*`,
       'exit /b %ERRORLEVEL%',
       '',
     ].join('\r\n'));
@@ -130,8 +129,8 @@ function writeCommandShim(binDir, command, runnerPath) {
 
   writeFileIfChanged(path.join(binDir, command), [
     '#!/bin/sh',
-    ': "${YIBIAO_ELECTRON_NODE:=node}"',
-    `ELECTRON_RUN_AS_NODE=1 exec "$YIBIAO_ELECTRON_NODE" ${quoteSh(runnerPath)} ${quoteSh(command)} "$@"`,
+    ': "${YIBIAO_SANDBOX_NODE:?missing YIBIAO_SANDBOX_NODE}"',
+    `exec "$YIBIAO_SANDBOX_NODE" ${quoteSh(runnerPath)} ${quoteSh(command)} "$@"`,
     '',
   ].join('\n'), 0o755);
 }
@@ -935,32 +934,49 @@ function writeOpenCodeAgentsFile(workspaceDir) {
   return targetPath;
 }
 
-function prependPathEntries(env, entries) {
+// 只注入应用内工具与系统基础 PATH，不继承宿主全局命令目录。
+function prependPathEntries(env, entries, nodeExecutablePath) {
   const pathKey = process.platform === 'win32' && env.Path ? 'Path' : 'PATH';
   const existingPath = env[pathKey] || env.PATH || env.Path || '';
   const nextPath = [...entries, existingPath].filter(Boolean).join(path.delimiter);
   env.PATH = nextPath;
   if (process.platform === 'win32') env.Path = nextPath;
-  env.YIBIAO_ELECTRON_NODE = process.execPath;
+  env.YIBIAO_SANDBOX_NODE = nodeExecutablePath;
   return env;
 }
 
-function ensureOpenCodeToolEnvironment({ app, workspaceDir } = {}) {
-  const runtimeToolsBinDir = getRuntimeToolsBinDir(app);
-  const bundledToolsBinDir = getBundledOpencodeToolsBinDir(app);
+// 在新版沙箱根目录内生成命令垫片，并校验只读发布工具。
+function ensureOpenCodeToolEnvironment({
+  app,
+  workspaceDir,
+  runtimeRoot,
+  bundledToolsBinDir: explicitBundledToolsBinDir,
+  nodeExecutablePath,
+} = {}) {
+  if (!nodeExecutablePath) {
+    throw new Error('缺少 OpenCode 沙箱 Node 可执行文件');
+  }
+  const runtimeToolsBinDir = getRuntimeToolsBinDir(runtimeRoot);
+  const bundledToolsBinDir = explicitBundledToolsBinDir || getBundledOpencodeToolsBinDir(app);
   ensureRuntimeShims(runtimeToolsBinDir);
   verifyBundledTools(bundledToolsBinDir);
   const agentsPath = writeOpenCodeAgentsFile(workspaceDir);
   return {
     runtimeToolsBinDir,
     bundledToolsBinDir,
+    nodeExecutablePath,
     agentsPath,
     pathEntries: [runtimeToolsBinDir, bundledToolsBinDir],
   };
 }
 
+// 将已准备的沙箱工具路径写入最小子进程环境。
 function applyOpenCodeToolEnvironment(env, toolEnvironment) {
-  return prependPathEntries(env, toolEnvironment?.pathEntries || []);
+  return prependPathEntries(
+    env,
+    toolEnvironment?.pathEntries || [],
+    toolEnvironment?.nodeExecutablePath || '',
+  );
 }
 
 module.exports = {

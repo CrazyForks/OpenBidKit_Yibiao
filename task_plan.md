@@ -2363,3 +2363,44 @@
 - macOS `verify.sh` 已通过 Git Bash 语法检查，三个 plist/entitlements 文件均通过 XML 解析。
 - 原型 README 已确认是有效 UTF-8 中文，不含替换字符或连续问号损坏。
 - 当前没有 macOS 执行环境，因此 Objective-C 编译、ad-hoc 签名和真实 App Sandbox 文件拒绝仍需在 macOS 真机验证。
+
+## Current Task: OpenCode 正式原生沙箱隔离
+
+### Goal
+把已确认的单层操作系统原生隔离接入正式 OpenCode Server 链路：Windows 使用完整受限令牌与作业对象，macOS 使用独立 App Sandbox 助手应用；全部 Agent 运行数据迁入专用沙箱根目录，并保持现有本机 AI 代理、认证、统计、数据库监听、任务归档和取消重启行为。沙箱准备或启动失败时直接终止 Agent 任务，不回退为普通进程。
+
+### Phases
+- [blocked] 1. Windows 启动器、确定性普通 NT SID、原生 ACL 和 Job Object 已完成；文件边界与进程树验证通过，但实际 Node/OpenCode 被系统 DLL 的受限 SID 访问检查阻断，等待重新确认 Windows 架构。
+- [in_progress] 2. macOS OpenCodeSandbox.app、继承授权、固定 Node 资源准备和 ad-hoc 签名验证源码已完成，等待 macOS 真机构建验证。
+- [completed] 3. 新增统一沙箱运行服务并迁移 HOME/XDG、工作区、任务、工具脚本和数据库路径。
+- [blocked] 4. OpenCode Server、自检和生命周期已完成静态接线；Windows 因加载器阻塞无法进入健康检查和 localhost 正式链路。
+- [completed] 5. 已接入开发、打包和发布 CI 的资源准备、平台验证、正式集成测试与最终安装包内容检查。
+- [blocked] 6. CJS、TypeScript、客户端构建和 Windows 解包产物已验证；Windows runtime 被方案级阻塞，macOS runtime 需真机执行。
+- [pending] 7. 正式验证覆盖原型能力后删除原型目录并完成文档收口。
+
+### Decisions
+- 不迁移、不删除旧 `agent-runtime`、`agent-cache`、会话、缓存和任务归档；新版本完全忽略旧目录。
+- Windows 不再使用 AppContainer；受限 SID 精确包含 Restricted Code `S-1-5-12` 与易标确定性普通 NT SID，ACL 通过 Win32 API写入原始 SID，不创建回环例外。
+- macOS 正式版和源码开发版使用互相独立的固定 HOME 相对目录及授权。
+- macOS 固定内置 Node.js 24.18.0；OpenCode、Node 与工具先签继承授权，再对助手 App 做 ad-hoc 签名。
+- 网络只保留当前 localhost OpenCode/AI 代理链路，不增加防火墙、域名白名单、文件代理或额外隔离层。
+- Renderer IPC 与用户配置结构保持不变；仅扩展 Agent 自检返回的沙箱诊断信息。
+
+### Errors Encountered
+| Error | Attempt | Resolution |
+| --- | --- | --- |
+| 当前工具内文件系统沙箱刷新异常导致普通只读 Shell 命令挂起 | 恢复现有规划记录 | 经审批改用沙箱外只读命令；文件修改改由标准 Git 补丁完成并逐次审核。 |
+| Windows `CreateRestrictedToken` 返回 Win32 87 | 使用原计划的 ARAP `S-1-15-2-2` 与易标包式 `S-1-15-2-*` 作为限制 SID | 实测确认 App Package Authority SID 不能用于该参数；用户已确认改用 `S-1-5-12` 与易标普通 NT SID，继续实现。 |
+| Windows Node、Electron Node 与 OpenCode 均以 `0xC0000135` 退出 | 使用已确认的 `S-1-5-12` 与易标普通 NT SID运行正式资源 | `cmd.exe` 只依赖核心 KnownDLL，可以启动；`where.exe`、`whoami.exe` 和实际运行时需要的扩展系统 DLL没有向 `S-1-5-12` 授权，第二次访问检查失败。追加 `S-1-15-2-2` 的临时实验又被 `CreateRestrictedToken` 以 Win32 87 直接拒绝；未扩大系统 ACL，标记为方案级阻塞并等待用户确认。 |
+| Electron 41 运行正式验收脚本时空转 | CLI 入口只使用 `require.main === module` 判断 | Electron 下该条件不可靠；增加实际入口脚本路径判断后，帮助命令和失败报告均能自行退出。 |
+
+### Validation
+- 新增和改造的相关 `.cjs` 文件全部通过 `node --check`。
+- `cd client; npm run build` 通过，只有既有 chunk 体积警告。
+- Windows C# 正式启动器编译成功；受限 token 精确包含 `S-1-5-12` 与易标确定性 SID。
+- Windows 内部中文路径读写成功，仓库 `AGENTS.md`、真实用户配置、业务工作区、全局 Skills 与 OpenCode 配置均被拒绝；父进程退出后 Job Object 会清理启动器和子进程树。
+- 正式 Electron 边界验收会结构化报告实际阻塞：探针子进程以 `3221225781 / 0xC0000135` 退出，随后无进程残留；未把该项误报为通过。
+- 统一服务已移除旧 `agent-runtime` / `agent-cache` 入口，HOME/XDG/TEMP、工作区、任务归档、工具脚本和 OpenCode 数据库均指向版本化沙箱根目录。
+- `electron-builder --dir --win --x64` 与 Windows 解包产物验收通过，`app.asar` 和 `extraResources` 包含预期正式沙箱入口、启动器、OpenCode 与工具。
+- macOS 助手 App 源码、生产/开发授权、继承授权、Node 24.18.0 固定摘要、签名与结构验证脚本已完成静态检查；真机验证尚未执行。
+- 因 Windows runtime 尚未通过且 macOS 真机验收未执行，原型目录按既定条件保留。

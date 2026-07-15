@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const Database = require('better-sqlite3');
-const { getAgentRuntimeDir, getBundledOpencodeBinaryPath } = require('../../utils/paths.cjs');
+const { createOpenCodeSandboxService } = require('./opencodeSandboxService.cjs');
 const { startOpenCodeSidecar, closeOpenCodeSidecar } = require('./opencodeServerRunner.cjs');
 const { createSession, sendPrompt, getSessionDiff } = require('./opencodeHttpClient.cjs');
 const { writeOpenCodeAgentsFile } = require('./opencodeToolEnvironment.cjs');
@@ -371,10 +371,12 @@ function getMessageRole(db, cache, messageId) {
 }
 
 function createOpenCodeRuntimeService({ app, configStore }) {
-  const runtimeRoot = getAgentRuntimeDir(app);
-  const serviceRuntimeRoot = path.join(runtimeRoot, 'service');
-  const serviceWorkspaceDir = path.join(serviceRuntimeRoot, 'workspace');
-  const tasksRoot = path.join(runtimeRoot, 'tasks');
+  const sandboxService = createOpenCodeSandboxService({ app });
+  const sandboxPaths = sandboxService.getPaths();
+  const sandboxResources = sandboxService.getResources();
+  const serviceRuntimeRoot = sandboxPaths.runtimeRoot;
+  const serviceWorkspaceDir = sandboxPaths.workspaceDir;
+  const tasksRoot = sandboxPaths.tasksDir;
   const diagnostics = createRuntimeDiagnostics();
   const listeners = new Set();
 
@@ -400,10 +402,9 @@ function createOpenCodeRuntimeService({ app, configStore }) {
   let healthFailureCount = 0;
   let healthRestartAttempted = false;
 
+  // 沙箱准备失败必须直接阻断 Agent，不创建非沙箱运行路径。
   function ensureRuntimeDirs() {
-    fs.mkdirSync(serviceRuntimeRoot, { recursive: true });
-    fs.mkdirSync(serviceWorkspaceDir, { recursive: true });
-    fs.mkdirSync(tasksRoot, { recursive: true });
+    sandboxService.prepare();
   }
 
   function appendRuntimeEvent(event = {}) {
@@ -451,6 +452,7 @@ function createOpenCodeRuntimeService({ app, configStore }) {
       queued_count: taskQueue.length,
       queued_tasks: getQueuedTaskSummaries(),
       proxy: sidecar?.getProxyStatus?.() || { active: 0, queued: 0, limit: 0 },
+      sandbox: sidecar?.sandboxInfo || sandboxService.getInfo(),
       opencode: {
         pid: sidecar?.pid || sidecar?.child?.pid || 0,
         base_url: sidecar?.baseUrl || '',
@@ -716,8 +718,7 @@ function createOpenCodeRuntimeService({ app, configStore }) {
       sidecar = await startOpenCodeSidecar({
         app,
         configStore,
-        runtimeRoot: serviceRuntimeRoot,
-        workspaceDir: serviceWorkspaceDir,
+        sandboxService,
         timeoutMs: DEFAULT_PROVIDER_TIMEOUT_MS,
         diagnostics,
         onStage: (stage, status, stageMessage, meta = {}) => {
@@ -982,7 +983,7 @@ function createOpenCodeRuntimeService({ app, configStore }) {
     const normalizedSessionId = String(sessionId || '').trim();
     if (!normalizedSessionId) return () => {};
 
-    const dbPath = path.join(serviceRuntimeRoot, 'home', '.local', 'share', 'opencode', 'opencode.db');
+    const dbPath = sandboxPaths.openCodeDatabasePath;
     const messageRoleCache = new Map();
     let lastSeq = -1;
     let stopped = false;
@@ -1366,6 +1367,7 @@ function createOpenCodeRuntimeService({ app, configStore }) {
 
   async function runSelfCheck() {
     if (activeTask || taskQueue.length) {
+      const sandboxInfo = sandboxService.getInfo();
       const busyResult = {
         success: false,
         status: 'busy',
@@ -1380,6 +1382,9 @@ function createOpenCodeRuntimeService({ app, configStore }) {
         output_file: SELF_CHECK_OUTPUT_FILE,
         output_path: path.join(serviceWorkspaceDir, SELF_CHECK_OUTPUT_FILE),
         opencode_binary_path: '',
+        sandbox_type: sandboxInfo.sandbox_type,
+        sandbox_info: sandboxInfo,
+        sandbox_boundary_probe: null,
         runtime_status: getStatus(),
         steps: [],
         detail_text: '',
@@ -1401,6 +1406,8 @@ function createOpenCodeRuntimeService({ app, configStore }) {
     let agentResult = null;
     let workspaceSnapshot = null;
     let agentTaskStarted = false;
+    let sandboxInfo = sandboxService.getInfo();
+    let boundaryProbe = null;
 
     function setStep(id, status, stepMessage, meta = {}) {
       const step = steps.find((item) => item.id === id);
@@ -1420,7 +1427,8 @@ function createOpenCodeRuntimeService({ app, configStore }) {
     function completeRuntimeSteps() {
       if (!sidecar) return;
       completeStep('ai-proxy-start', sidecar.aiProxyBaseUrl || '常驻 OpenCode AI proxy 可用');
-      completeStep('opencode-config-write', path.join(serviceRuntimeRoot, 'opencode.json'));
+      completeStep('opencode-config-write', sandboxPaths.openCodeConfigPath);
+      completeStep('sandbox-prepare', sidecar.sandboxInfo?.runtime_root || sandboxInfo.runtime_root);
       completeStep('opencode-server-start', sidecar.baseUrl || '常驻 OpenCode Server 可用');
       completeStep('opencode-health', sidecar.baseUrl || '常驻 OpenCode Server 健康检查通过');
     }
@@ -1437,7 +1445,7 @@ function createOpenCodeRuntimeService({ app, configStore }) {
       const messageText = String(event.message || '');
       const route = String(event.meta?.route || '');
 
-      if (['ai-proxy-start', 'opencode-config-write', 'opencode-server-start', 'opencode-health'].includes(stage)) {
+      if (['sandbox-prepare', 'ai-proxy-start', 'opencode-config-write', 'opencode-server-start', 'opencode-health'].includes(stage)) {
         setStep(stage, inferActivityStatus(event, /成功|完成|可用|通过/), messageText);
         return;
       }
@@ -1479,6 +1487,7 @@ function createOpenCodeRuntimeService({ app, configStore }) {
 
     function createBaseResult({ success, status, resultMessage, error }) {
       const runtimeStatus = getStatus();
+      const currentSandboxInfo = sidecar?.sandboxInfo || sandboxInfo || sandboxService.getInfo();
       const diagnosticsPayload = error ? compactSelfCheckError(error) : {
         opencode_binary_path: opencodeBinaryPath,
         opencode_base_url: sidecar?.baseUrl || '',
@@ -1488,6 +1497,13 @@ function createOpenCodeRuntimeService({ app, configStore }) {
         opencode_stdout_tail: sidecar?.getStdoutTail?.(8000) || '',
         opencode_stderr_tail: sidecar?.getStderrTail?.(8000) || '',
         opencode_request_log: agentResult?.opencode_request_log || sidecar?.requestLog || [],
+        sandbox_type: currentSandboxInfo.sandbox_type,
+        sandbox_root: currentSandboxInfo.runtime_root,
+        sandbox_launcher_path: currentSandboxInfo.launcher_path,
+        sandbox_sid: currentSandboxInfo.sandbox_sid || '',
+        sandbox_bundle_identifier: currentSandboxInfo.bundle_identifier || '',
+        sandbox_diagnostics: currentSandboxInfo.diagnostics || [],
+        sandbox_boundary_probe: boundaryProbe,
       };
       diagnosticsPayload.opencode_binary_path = diagnosticsPayload.opencode_binary_path || opencodeBinaryPath;
       diagnosticsPayload.opencode_base_url = diagnosticsPayload.opencode_base_url || sidecar?.baseUrl || '';
@@ -1501,6 +1517,15 @@ function createOpenCodeRuntimeService({ app, configStore }) {
       }
       diagnosticsPayload.runtime_status = runtimeStatus;
 
+      diagnosticsPayload.sandbox_type = diagnosticsPayload.sandbox_type || currentSandboxInfo.sandbox_type;
+      diagnosticsPayload.sandbox_root = diagnosticsPayload.sandbox_root || currentSandboxInfo.runtime_root;
+      diagnosticsPayload.sandbox_launcher_path = diagnosticsPayload.sandbox_launcher_path || currentSandboxInfo.launcher_path;
+      diagnosticsPayload.sandbox_sid = diagnosticsPayload.sandbox_sid || currentSandboxInfo.sandbox_sid || '';
+      diagnosticsPayload.sandbox_bundle_identifier = diagnosticsPayload.sandbox_bundle_identifier || currentSandboxInfo.bundle_identifier || '';
+      if (!diagnosticsPayload.sandbox_diagnostics?.length) {
+        diagnosticsPayload.sandbox_diagnostics = currentSandboxInfo.diagnostics || [];
+      }
+      diagnosticsPayload.sandbox_boundary_probe = diagnosticsPayload.sandbox_boundary_probe || boundaryProbe;
       const workspaceDir = agentResult?.workspace_dir || error?.agentWorkspaceDir || serviceWorkspaceDir;
       const outputPath = agentResult?.workspace_dir
         ? path.join(agentResult.workspace_dir, SELF_CHECK_OUTPUT_FILE)
@@ -1520,6 +1545,9 @@ function createOpenCodeRuntimeService({ app, configStore }) {
         output_content: agentResult?.output_content || error?.agentPartialOutput || '',
         opencode_binary_path: opencodeBinaryPath,
         model_config: modelConfig,
+        sandbox_type: currentSandboxInfo.sandbox_type,
+        sandbox_info: currentSandboxInfo,
+        sandbox_boundary_probe: boundaryProbe,
         environment,
         direct_model_test: directModelTest,
         tool_check_summary: toolCheckResult?.summary || '',
@@ -1546,7 +1574,7 @@ function createOpenCodeRuntimeService({ app, configStore }) {
     }
 
     try {
-      opencodeBinaryPath = getBundledOpencodeBinaryPath(app);
+      opencodeBinaryPath = sandboxResources.opencodePath;
       config = configStore.load();
       modelConfig = summarizeTextModelConfig(config);
 
@@ -1554,12 +1582,18 @@ function createOpenCodeRuntimeService({ app, configStore }) {
       if (logger.getSetupError()) {
         throw createSelfCheckStageError('prepare', `自检日志目录不可写：${logger.getSetupError()}`);
       }
-      ensureRuntimeDirs();
+      setStep('sandbox-prepare', 'running', '正在准备操作系统原生沙箱');
+      sandboxInfo = sandboxService.prepare();
+      setStep('sandbox-prepare', 'success', `${sandboxInfo.sandbox_type}：${sandboxInfo.runtime_root}`);
       fs.rmSync(path.join(tasksRoot, safeTaskPathSegment(SELF_CHECK_TASK_ID)), { recursive: true, force: true });
       setStep('prepare', 'success', '自检日志和旧归档已清理');
 
+      setStep('sandbox-boundary', 'running', '正在验证真实 HOME、全局配置和业务数据不可读');
+      boundaryProbe = await sandboxService.runBoundaryProbe();
+      setStep('sandbox-boundary', 'success', `内部路径可读，${boundaryProbe.blocked_count || 0} 个外部边界已阻断`);
+
       setStep('environment-snapshot', 'running', '正在采集本机环境和模型配置摘要');
-      environment = createEnvironmentSnapshot(app, opencodeBinaryPath, config);
+      environment = createEnvironmentSnapshot(app, opencodeBinaryPath, config, sandboxInfo);
       setStep('environment-snapshot', 'success', '环境快照已采集');
 
       setStep('binary-check', 'running', '正在检查 OpenCode 程序文件');
@@ -1583,6 +1617,9 @@ function createOpenCodeRuntimeService({ app, configStore }) {
         runtimeRoot: serviceRuntimeRoot,
         workspaceDir: serviceWorkspaceDir,
         logger,
+        sandboxPaths,
+        sandboxResources,
+        createSandboxEnvironment: (extra) => sandboxService.createEnvironment(extra),
       });
       setStep('tool-check', 'success', toolCheckResult.success
         ? toolCheckResult.summary || '集成工具校验通过'

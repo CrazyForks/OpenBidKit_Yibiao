@@ -20,9 +20,9 @@ const settingsTabs: Array<{ id: SettingsTab; label: string }> = [
 ];
 
 const agentSelfCheckStatusMeta: Record<AgentSelfCheckUiStatus, { label: string; description: string }> = {
-  untested: { label: '未检测', description: '点击自检后，会验证 OpenCode Server、AI proxy、已集成命令工具、当前文本模型和智能体输出链路。' },
-  checking: { label: '检测中', description: '正在清理上一轮自检日志，并校验工具环境与极简智能体任务。' },
-  normal: { label: '正常', description: '智能体链路和关键集成工具已通过自检，可以用于目录修复等 Agent 能力。' },
+  untested: { label: '未检测', description: '点击自检后，会验证操作系统原生沙箱边界、OpenCode Server、AI proxy、已集成命令工具、当前文本模型和智能体输出链路。' },
+  checking: { label: '检测中', description: '正在清理上一轮自检日志，并校验沙箱边界、工具环境与极简智能体任务。' },
+  normal: { label: '正常', description: '原生沙箱边界、智能体链路和关键集成工具已通过自检，可以用于目录修复等 Agent 能力。' },
   busy: { label: '忙碌', description: 'Agent 正在处理其他任务，本次自检已跳过；这不是 OpenCode 故障。' },
   error: { label: '异常', description: '智能体链路自检失败，请查看下方错误详情。' },
 };
@@ -1971,7 +1971,7 @@ function SettingsPage({ onDeveloperModeChange }: SettingsPageProps) {
             <div className="settings-row">
               <div className="settings-row-copy">
                 <strong>自检</strong>
-                <span>执行一个极简智能体任务，检测 OpenCode Server、AI proxy、已集成命令工具、当前文本模型和输出文件校验链路。每次自检前会清空上一轮自检日志。</span>
+                <span>执行一个极简智能体任务，检测操作系统原生沙箱边界、OpenCode Server、AI proxy、已集成命令工具、当前文本模型和输出文件校验链路。每次自检前会清空上一轮自检日志。</span>
               </div>
               <div className="settings-action-cell">
                 <button type="button" className="inline-action" onClick={runAgentSelfCheck} disabled={agentSelfCheckStatus === 'checking'}>

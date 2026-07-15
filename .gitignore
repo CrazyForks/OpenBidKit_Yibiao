@@ -26,6 +26,8 @@ client/release/
 client/.tmp-opencode-download/
 client/vendor/opencode/*
 !client/vendor/opencode/VERSION
+client/.tmp-opencode-sandbox/
+client/vendor/opencode-sandbox/
 
 # 临时和缓存文件
 *.tmp

@@ -42,7 +42,10 @@ function collectNativeBinaries(directory, binaries = []) {
     }
 
     const normalizedPath = entryPath.split(path.sep).join('/');
-    if (entry.name.endsWith('.node') || normalizedPath.includes('/Contents/MacOS/')) {
+    const isSandboxChild = normalizedPath.includes(
+      '/OpenCodeSandbox.app/Contents/Resources/bin/',
+    );
+    if (entry.name.endsWith('.node') || normalizedPath.includes('/Contents/MacOS/') || isSandboxChild) {
       binaries.push(entryPath);
     }
   }

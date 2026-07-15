@@ -331,3 +331,13 @@
 - macOS 使用 Apple 明确规定的 `NSHomeDirectory()` 获取容器主目录；OpenCode 子进程通过固定 `envp` 接收 HOME/XDG/TMPDIR，既不继承宿主配置变量，也不需要 `clearenv()`。
 - macOS 权限需要写入代码签名，但原型使用 `codesign --sign -` 的 ad-hoc 签名即可本机验证，不需要 Developer ID；分发时的 Gatekeeper 与公证问题不属于本次隔离原型。
 - 当前 Windows 环境只能完成 Bash 语法和 plist XML 静态检查；macOS 的 Objective-C 编译、签名加载和真实文件拒绝必须在真机上验证，当前不能宣称已经通过。
+- 正式实现采用一层原生隔离：Windows 完整受限令牌 + Job Object；macOS 独立 App Sandbox 助手 App。环境变量重定向只负责路径组织，真正的数据边界由操作系统访问检查提供。
+- 旧 `agent-runtime` 与 `agent-cache` 不迁移也不删除；正式运行目录使用新的版本化沙箱根，避免旧配置、会话和任务被意外读取。
+- 正式接入必须保持两个 localhost 方向：Electron 到 OpenCode Server，以及 OpenCode 到 Electron AI 代理；上游模型 Key 仍只留在 Electron，沙箱只接收随机代理令牌。
+- Windows 正式源码实测确认：`CreateRestrictedToken` 的限制 SID 数组放入 `S-1-15-2-2` 或易标派生的 `S-1-15-2-*` 会返回 `ERROR_INVALID_PARAMETER (87)`；这不是 P/Invoke、参数数量或 Job Object 导致，最小 `cmd.exe` 启动同样失败。
+- `S-1-5-12` 是 Windows 官方定义的 Restricted Code SID，适用于完整受限令牌的第二次访问检查；若继续单层受限令牌路线，应与易标确定性普通 NT SID 组合，并用原生 ACL API 写入未注册 SID。
+- Windows 启动器必须监测 Electron 父 PID；仅使用 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 不能覆盖 Electron 被强制终止而启动器仍存活的场景。macOS 助手同样需要父 PID 监督和独立进程组清理。
+- Node.js 官方 v24.18.0 发布页确认 macOS x64 `.tar.gz` SHA-256 为 `dfd0dbd3e721503434df7b7205e719f61b3a3a31b2bcf9729b8b91fea240f080`，arm64 为 `e1a97e14c99c803e96c7339403282ea05a499c32f8d83defe9ef5ec66f979ed1`；当前 macOS 构建配置与官方摘要一致。
+- Windows 正式受限令牌的根本阻塞已经实测确认：`S-1-5-12 + 易标普通 SID` 能创建 token、读写授权中文目录并拒绝真实 HOME/仓库/业务数据，但 `where.exe`、`whoami.exe`、Node、Electron 和 OpenCode 需要的扩展系统 DLL未向 Restricted Code 授权，因此在应用代码执行前以 `0xC0000135` 退出。
+- `S-1-15-2-2` 不能作为 `CreateRestrictedToken` 的 `SidsToRestrict` 成员；无论与 `S-1-5-12` 组合还是只与易标 SID组合，API都直接返回 Win32 87。当前约束下不存在“补充所有受限应用包 SID”这一最小修正。
+- Windows 要同时满足实际 OpenCode 运行、完整文件隔离、无管理员系统 ACL变更、无 AppContainer 回环例外且无额外 IPC层，当前验证表明这些约束不可同时成立；继续实现必须由用户重新确认至少一项架构取舍。

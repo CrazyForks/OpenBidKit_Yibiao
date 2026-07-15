@@ -284,3 +284,10 @@
 - macOS 同构原型已完成：最小启动器通过 `NSHomeDirectory()` 使用系统容器，OpenCode 仅继承 App Sandbox，并以 ad-hoc 签名嵌入临时无界面应用包。
 - macOS `verify.sh` 通过 Git Bash 语法检查，三个 plist/entitlements 文件通过 XML 解析；由于当前没有 macOS 和对应二进制，真实编译、签名和隔离执行仍待真机。
 - OpenCode 原生沙箱小原型完成：Windows 完整验证再次退出 0，内部标记可读、仓库文件拒绝、测试容器无残留；说明文档已用 UTF-8 重建并复核。
+- 开始 OpenCode 正式原生沙箱隔离：已将 Windows 原生启动器、macOS 助手 App 和 Electron/构建集成拆为独立实施块；当前进入原生资源与统一运行服务实现阶段。
+- 已完成统一沙箱服务、版本化 HOME/XDG/TEMP/工作区/任务/数据库迁移、OpenCode Server 沙箱启动接线、自检边界探测、沙箱诊断类型，以及 Windows Job Object/父进程监督和 macOS 助手 App 源码；10 个 CJS 语法检查与 `npm run build` 均通过。
+- Windows 正式启动器复现实测在 `CreateRestrictedToken` 返回 Win32 87：原计划的 ARAP/包式限制 SID 不被该 API 接受。已停止后续打包与正式边界测试，等待用户确认改为 `S-1-5-12` + 易标确定性普通 NT SID，不擅自改变已确认方案。
+- 用户已确认 Windows 修正方案：限制 SID 改为 `S-1-5-12` + 易标确定性普通 NT SID，ACL 改为 Win32 原生 raw SID 写入；其余单层隔离、无回退、无管理员依赖边界不变，开始继续实施。
+- Windows 正式受限 token 已完成 SID、ACL、中文目录边界与 Job Object 验证：内部读写成功，真实 HOME、全局 Skills/OpenCode 配置、项目与业务数据被拒绝，父进程退出后无孤儿进程。
+- Windows 实际 runtime 验收确认方案级阻塞：Electron Node/OpenCode 在 loader 阶段以 `3221225781 / 0xC0000135` 退出；追加 `S-1-15-2-2` 的临时实验在 token 创建阶段返回 Win32 87，未修改系统 ACL或扩大授权。
+- 构建与发布接线完成，`npm run build`、Windows 解包构建和打包内容验证通过；正式 Electron 验收脚本入口已修复，能结构化报告阻塞并自行退出。macOS 源码与静态验证已完成，真机 runtime 尚未执行，原型目录因此保留。

@@ -7,16 +7,24 @@
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/prepare-opencode-sandbox.cjs --profile development && node scripts/verify-opencode-sandbox.cjs --profile development",
     "dev": "concurrently -k -n vite,electron -c blue,magenta \"vite --host 127.0.0.1 --port 5173 --strictPort\" \"wait-on http://127.0.0.1:5173 && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron .\"",
     "build": "tsc --noEmit && vite build",
+    "predist": "node scripts/prepare-opencode-sandbox.cjs --profile production && node scripts/verify-opencode-sandbox.cjs --profile production",
     "dist": "npm run build && electron-builder",
+    "predist:win": "node scripts/prepare-opencode-sandbox.cjs --platform win32 --arch x64 --profile production && node scripts/verify-opencode-sandbox.cjs --platform win32 --arch x64 --profile production",
     "dist:win": "npm run build && electron-builder --win",
+    "predist:mac": "node scripts/prepare-opencode-sandbox.cjs --platform darwin --profile production && node scripts/verify-opencode-sandbox.cjs --platform darwin --profile production",
     "dist:mac": "npm run build && electron-builder --mac",
     "postinstall": "electron-builder install-app-deps",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "generate-build-attestation": "node scripts/generate-build-attestation.cjs",
     "prepare-opencode-tools": "node scripts/prepare-opencode-tools.cjs",
     "verify-opencode-tools": "node scripts/verify-opencode-tools.cjs",
+    "prepare-opencode-sandbox": "node scripts/prepare-opencode-sandbox.cjs",
+    "verify-opencode-sandbox": "node scripts/verify-opencode-sandbox.cjs",
+    "verify:opencode-sandbox:integration": "electron scripts/test-opencode-sandbox-integration.cjs",
+    "verify-packaged-opencode-sandbox": "node scripts/verify-packaged-opencode-sandbox.cjs",
     "smoke:electron-native": "electron scripts/electron-native-smoke.cjs",
     "start": "electron ."
   },
@@ -32,23 +40,8 @@
       "dist/**/*",
       "electron/**/*",
       "assets/**/*",
+      "scripts/opencode-sandbox/windows/**/*.cjs",
       "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "vendor/opencode",
-        "to": "opencode",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "vendor/opencode-tools",
-        "to": "opencode-tools",
-        "filter": [
-          "**/*"
-        ]
-      }
     ],
     "publish": [
       {
@@ -60,6 +53,29 @@
     ],
     "win": {
       "icon": "assets/icon.ico",
+      "extraResources": [
+        {
+          "from": "vendor/opencode",
+          "to": "opencode",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "vendor/opencode-tools",
+          "to": "opencode-tools",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "vendor/opencode-sandbox/win32-${arch}",
+          "to": "opencode-sandbox/win32-${arch}",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ],
       "target": [
         {
           "target": "nsis",
@@ -90,21 +106,18 @@
       "icon": "assets/icon.icns",
       "identity": null,
       "category": "public.app-category.business",
-      "target": [
+      "extraResources": [
         {
-          "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "x64",
-            "arm64"
+          "from": "vendor/opencode-sandbox/darwin-${arch}/production/OpenCodeSandbox.app",
+          "to": "opencode-sandbox/darwin-${arch}/production/OpenCodeSandbox.app",
+          "filter": [
+            "**/*"
           ]
         }
+      ],
+      "target": [
+        "dmg",
+        "zip"
       ]
     },
     "dmg": {

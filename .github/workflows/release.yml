@@ -137,6 +137,15 @@ jobs:
           fi
           npm run generate-build-attestation
 
+      - name: Prepare OpenCode sandbox
+        run: node scripts/prepare-opencode-sandbox.cjs --platform win32 --arch x64 --profile production --force
+
+      - name: Verify OpenCode sandbox
+        run: node scripts/verify-opencode-sandbox.cjs --platform win32 --arch x64 --profile production
+
+      - name: Run OpenCode sandbox integration
+        run: npm run verify:opencode-sandbox:integration
+
       - name: Build renderer
         run: npm run build
 
@@ -146,11 +155,8 @@ jobs:
       - name: Build Windows MSI artifact
         run: npx electron-builder --win msi --publish never -c.productName=OpenBidKit_Yibiao -c.extraMetadata.author=mark -c.copyright="Copyright (c) 2026 mark"
 
-      - name: Verify packaged OpenCode binary
-        run: node scripts/verify-packaged-opencode-binary.cjs --platform win32 --arch x64 --release release
-
-      - name: Verify packaged OpenCode tools
-        run: node scripts/verify-packaged-opencode-tools.cjs --platform win32 --arch x64 --release release
+      - name: Verify packaged OpenCode sandbox
+        run: node scripts/verify-packaged-opencode-sandbox.cjs --platform win32 --arch x64 --release release
 
       - name: Upload release assets
         env:
@@ -264,6 +270,21 @@ jobs:
           fi
           npm run generate-build-attestation
 
+      - name: Prepare development OpenCode sandbox helper
+        run: node scripts/prepare-opencode-sandbox.cjs --platform darwin --arch ${{ matrix.arch }} --profile development
+
+      - name: Verify development OpenCode sandbox helper
+        run: node scripts/verify-opencode-sandbox.cjs --platform darwin --arch ${{ matrix.arch }} --profile development
+
+      - name: Run OpenCode sandbox integration
+        run: npm run verify:opencode-sandbox:integration
+
+      - name: Prepare production OpenCode sandbox helper
+        run: node scripts/prepare-opencode-sandbox.cjs --platform darwin --arch ${{ matrix.arch }} --profile production
+
+      - name: Verify production OpenCode sandbox helper
+        run: node scripts/verify-opencode-sandbox.cjs --platform darwin --arch ${{ matrix.arch }} --profile production
+
       - name: Generate macOS icon
         run: |
           rm -rf assets/icon.iconset
@@ -324,11 +345,8 @@ jobs:
       - name: Verify packaged native architectures
         run: node scripts/verify-macos-native-arch.cjs "${{ matrix.arch }}" release
 
-      - name: Verify packaged OpenCode binary
-        run: node scripts/verify-packaged-opencode-binary.cjs --platform darwin --arch ${{ matrix.arch }} --release release
-
-      - name: Verify packaged OpenCode tools
-        run: node scripts/verify-packaged-opencode-tools.cjs --platform darwin --arch ${{ matrix.arch }} --release release
+      - name: Verify packaged OpenCode sandbox
+        run: node scripts/verify-packaged-opencode-sandbox.cjs --platform darwin --arch ${{ matrix.arch }} --release release
 
       - name: Stage macOS release assets
         uses: actions/upload-artifact@v4

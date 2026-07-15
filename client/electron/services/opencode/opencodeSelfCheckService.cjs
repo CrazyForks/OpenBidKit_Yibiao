@@ -3,8 +3,6 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const {
-  getAgentCacheDir,
-  getAgentRuntimeDir,
   getDeveloperLogsDir,
   getUserDataPath,
 } = require('../../utils/paths.cjs');
@@ -56,27 +54,6 @@ function getExpectedToolPath(toolEnvironment, descriptor) {
     return path.join(toolEnvironment.bundledToolsBinDir, getExecutableName(descriptor.command));
   }
   return path.join(toolEnvironment.runtimeToolsBinDir, process.platform === 'win32' ? `${descriptor.command}.cmd` : descriptor.command);
-}
-
-function buildMinimalToolCheckEnv(extra = {}) {
-  const keepKeys = [
-    'PATH',
-    'Path',
-    'SystemRoot',
-    'WINDIR',
-    'TEMP',
-    'TMP',
-    'TMPDIR',
-    'LANG',
-    'LC_ALL',
-    'ComSpec',
-    'PATHEXT',
-  ];
-  const env = {};
-  keepKeys.forEach((key) => {
-    if (process.env[key]) env[key] = process.env[key];
-  });
-  return { ...env, ...extra };
 }
 
 function shellCommand(command, cwd, env, timeoutMs = TOOL_CHECK_TIMEOUT_MS) {
@@ -225,24 +202,33 @@ function summarizeToolChecks(items) {
   return parts.join('，');
 }
 
-function runIntegratedToolSelfCheck({ app, runtimeRoot, workspaceDir, logger } = {}) {
+function runIntegratedToolSelfCheck({
+  app,
+  runtimeRoot,
+  workspaceDir,
+  logger,
+  sandboxPaths,
+  sandboxResources,
+  createSandboxEnvironment,
+} = {}) {
   const checkDir = path.join(workspaceDir, `.agent-tool-check-${Date.now()}`);
-  const homeDir = path.join(runtimeRoot, 'home');
-  const dataHome = path.join(homeDir, '.local', 'share');
-  const cacheHome = path.join(getAgentCacheDir(app), 'opencode-cache');
   let toolEnvironment = null;
 
   try {
     fs.mkdirSync(checkDir, { recursive: true });
     fs.writeFileSync(path.join(checkDir, 'tool-check-input.txt'), `${TOOL_CHECK_INPUT}\n`, 'utf-8');
 
-    toolEnvironment = ensureOpenCodeToolEnvironment({ app, workspaceDir });
-    const env = applyOpenCodeToolEnvironment(buildMinimalToolCheckEnv({
-      HOME: homeDir,
-      USERPROFILE: homeDir,
-      XDG_DATA_HOME: dataHome,
-      XDG_CACHE_HOME: cacheHome,
-    }), toolEnvironment);
+    if (!sandboxPaths || !sandboxResources || typeof createSandboxEnvironment !== 'function') {
+      throw new Error('集成工具自检缺少 OpenCode 沙箱路径或最小环境');
+    }
+    toolEnvironment = ensureOpenCodeToolEnvironment({
+      app,
+      workspaceDir,
+      runtimeRoot,
+      bundledToolsBinDir: sandboxResources.bundledToolsBinDir,
+      nodeExecutablePath: sandboxResources.nodePath,
+    });
+    const env = applyOpenCodeToolEnvironment(createSandboxEnvironment({}), toolEnvironment);
 
     const items = TOOL_CHECK_DESCRIPTORS.map((descriptor) => {
       const expectedPath = getExpectedToolPath(toolEnvironment, descriptor);
@@ -461,7 +447,7 @@ function safeStat(filePath) {
   }
 }
 
-function createEnvironmentSnapshot(app, opencodeBinaryPath, config) {
+function createEnvironmentSnapshot(app, opencodeBinaryPath, config, sandboxInfo = {}) {
   const opencodeRoot = path.dirname(path.dirname(opencodeBinaryPath));
   return {
     app: {
@@ -481,10 +467,13 @@ function createEnvironmentSnapshot(app, opencodeBinaryPath, config) {
       },
     },
     paths: {
-      agent_runtime_dir: getAgentRuntimeDir(app),
-      agent_cache_dir: getAgentCacheDir(app),
+      sandbox_runtime_dir: sandboxInfo.runtime_root || '',
+      sandbox_launcher_path: sandboxInfo.launcher_path || '',
       opencode_binary_path: opencodeBinaryPath,
+      node_binary_path: sandboxInfo.node_path || '',
+      bundled_tools_bin_dir: sandboxInfo.bundled_tools_bin_dir || '',
     },
+    sandbox: sandboxInfo,
     opencode: {
       binary: safeStat(opencodeBinaryPath),
       version_file: fs.existsSync(path.join(opencodeRoot, 'VERSION')) ? clipText(fs.readFileSync(path.join(opencodeRoot, 'VERSION'), 'utf-8'), 200) : '',
@@ -555,7 +544,9 @@ function createSelfCheckConclusion(result) {
   const lastProxySuccess = findLastProxyEvent(proxyEvents, 'proxy.upstream.completed');
   const lastHeaders = findLastProxyEvent(proxyEvents, 'proxy.upstream.headers');
 
-  if (result.success) return '结论：智能体自检通过，OpenCode Server、AI proxy、上游模型和文件输出链路均正常。';
+  if (result.success) return '结论：智能体自检通过，原生沙箱边界、OpenCode Server、AI proxy、上游模型和文件输出链路均正常。';
+  if (failedStep?.id === 'sandbox-prepare') return '结论：OpenCode 原生沙箱准备失败，Agent 已停止且没有回退为普通进程。';
+  if (failedStep?.id === 'sandbox-boundary') return '结论：OpenCode 原生沙箱文件边界未通过，Agent 已停止运行。';
   if (failedStep?.id === 'binary-check') return '结论：OpenCode 程序文件缺失或不可访问，属于安装包资源问题。';
   if (failedStep?.id === 'runtime-write-check') return '结论：自检运行目录无法写入，属于本机用户目录权限或磁盘问题。';
   if (failedStep?.id === 'direct-model-test' || direct?.success === false) {
@@ -599,7 +590,9 @@ function createStageError(stage, message) {
 
 function createSelfCheckSteps() {
   return [
-    { id: 'prepare', label: '清理旧自检日志和运行目录', status: 'pending', message: '' },
+    { id: 'prepare', label: '清理上轮自检日志和归档', status: 'pending', message: '' },
+    { id: 'sandbox-prepare', label: '准备操作系统原生沙箱', status: 'pending', message: '' },
+    { id: 'sandbox-boundary', label: '探测沙箱文件访问边界', status: 'pending', message: '' },
     { id: 'environment-snapshot', label: '采集环境快照', status: 'pending', message: '' },
     { id: 'binary-check', label: '检查 OpenCode 程序文件', status: 'pending', message: '' },
     { id: 'runtime-write-check', label: '检查运行目录写入能力', status: 'pending', message: '' },
@@ -684,6 +677,13 @@ function compactSelfCheckError(error) {
     opencode_stdout_tail: clipText(error?.openCodeStdoutTail || '', 4000),
     opencode_stderr_tail: clipText(error?.openCodeStderrTail || '', 4000),
     opencode_request_log: Array.isArray(error?.openCodeRequestLog) ? error.openCodeRequestLog : [],
+    sandbox_type: error?.sandboxType || '',
+    sandbox_root: error?.sandboxRoot || '',
+    sandbox_launcher_path: error?.sandboxLauncherPath || '',
+    sandbox_sid: error?.sandboxSid || '',
+    sandbox_bundle_identifier: error?.sandboxBundleIdentifier || '',
+    sandbox_diagnostics: Array.isArray(error?.sandboxDiagnostics) ? error.sandboxDiagnostics : [],
+    sandbox_boundary_probe: error?.sandboxBoundaryProbe || null,
   };
 }
 
@@ -724,6 +724,8 @@ function formatSelfCheckDetails(result) {
     `自动诊断：${result.conclusion || '-'}`,
     `时间：${result.checked_at}`,
     `消息：${result.message}`,
+    `沙箱类型：${result.sandbox_type || '-'}`,
+    `沙箱启动器：${result.sandbox_info?.launcher_path || '-'}`,
     `OpenCode 路径：${result.opencode_binary_path || '-'}`,
     `运行目录：${result.runtime_root || '-'}`,
     `工作目录：${result.workspace_dir || '-'}`,
@@ -735,6 +737,11 @@ function formatSelfCheckDetails(result) {
   (result.steps || []).forEach((step) => {
     lines.push(`- ${step.label}：${step.status}${step.message ? `，${step.message}` : ''}`);
   });
+  if (result.sandbox_boundary_probe) {
+    lines.push('');
+    lines.push('沙箱边界探测：');
+    lines.push(JSON.stringify(result.sandbox_boundary_probe, null, 2));
+  }
 
   if (result.error) {
     lines.push('');
@@ -864,8 +871,10 @@ function buildSelfCheckReportMarkdown(input = {}) {
     `- 消息：${markdownValue(result.message)}`,
     `- 检测时间：${markdownValue(result.checked_at)}`,
     `- 耗时：${result.duration_ms ? `${result.duration_ms} ms` : '-'}`,
+    `- 沙箱类型：${markdownValue(result.sandbox_type || diagnostics.sandbox_type)}`,
+    `- 沙箱启动器：${markdownValue(result.sandbox_info?.launcher_path || diagnostics.sandbox_launcher_path)}`,
     `- OpenCode 路径：${markdownValue(result.opencode_binary_path || diagnostics.opencode_binary_path)}`,
-    `- Runtime 目录：${markdownValue(result.runtime_root || diagnostics.agent_runtime_root)}`,
+    `- Runtime 目录：${markdownValue(result.runtime_root || diagnostics.sandbox_root || diagnostics.agent_runtime_root)}`,
     `- Workspace 目录：${markdownValue(result.workspace_dir || diagnostics.agent_workspace_dir)}`,
     `- 输出文件：${markdownValue(result.output_path || diagnostics.agent_output_path)}`,
     `- 自检日志：${markdownValue(result.log_file)}`,
@@ -902,6 +911,7 @@ function buildSelfCheckReportMarkdown(input = {}) {
     lines.push('本次自检未发现错误。');
   }
 
+  lines.push('', '## 沙箱边界探测', '', markdownFence(result.sandbox_boundary_probe || diagnostics.sandbox_boundary_probe || {}, 'json'));
   lines.push('', '## 环境快照', '', markdownFence(result.environment || {}, 'json'));
   lines.push('', '## 模型配置摘要', '', markdownFence(result.model_config || {}, 'json'));
   lines.push('', '## 直接模型测试', '', markdownFence(result.direct_model_test || {}, 'json'));

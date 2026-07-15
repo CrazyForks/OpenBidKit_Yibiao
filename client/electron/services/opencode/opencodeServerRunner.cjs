@@ -1,12 +1,6 @@
 const fs = require('node:fs');
 const net = require('node:net');
-const path = require('node:path');
 const crypto = require('node:crypto');
-const { spawn } = require('node:child_process');
-const {
-  getAgentCacheDir,
-  getBundledOpencodeBinaryPath,
-} = require('../../utils/paths.cjs');
 const { createAiServiceOpenAiProxy } = require('./aiServiceOpenAiProxy.cjs');
 const { writeOpenCodeConfig } = require('./opencodeConfigFactory.cjs');
 const {
@@ -18,14 +12,12 @@ function createBasicAuth(username, password) {
   return `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
 }
 
+// 检查已准备的 OpenCode 文件可执行，但不修改 macOS 签名资源。
 function ensureExecutable(filePath) {
   if (!fs.existsSync(filePath)) {
     throw new Error(`OpenCode binary 不存在：${filePath}`);
   }
-
-  if (process.platform !== 'win32') {
-    try { fs.chmodSync(filePath, 0o755); } catch {}
-  }
+  if (process.platform !== 'win32') fs.accessSync(filePath, fs.constants.X_OK);
 }
 
 function findFreePort() {
@@ -43,29 +35,6 @@ function findFreePort() {
       });
     });
   });
-}
-
-function buildMinimalChildEnv(extra) {
-  const keepKeys = [
-    'PATH',
-    'Path',
-    'SystemRoot',
-    'WINDIR',
-    'TEMP',
-    'TMP',
-    'TMPDIR',
-    'LANG',
-    'LC_ALL',
-    'ComSpec',
-    'PATHEXT',
-  ];
-
-  const env = {};
-  keepKeys.forEach((key) => {
-    if (process.env[key]) env[key] = process.env[key];
-  });
-
-  return { ...env, ...extra };
 }
 
 function createStderrBuffer(limit = 20000) {
@@ -113,6 +82,11 @@ function attachOpenCodeDiagnostics(error, meta = {}) {
   error.openCodeBinaryPath = meta.opencodeBin || error.openCodeBinaryPath || '';
   error.openCodeWorkspaceDir = meta.workspaceDir || error.openCodeWorkspaceDir || '';
   error.openCodeRuntimeRoot = meta.runtimeRoot || error.openCodeRuntimeRoot || '';
+  error.sandboxType = meta.sandboxInfo?.sandbox_type || error.sandboxType || '';
+  error.sandboxRoot = meta.sandboxInfo?.runtime_root || error.sandboxRoot || '';
+  error.sandboxLauncherPath = meta.sandboxInfo?.launcher_path || error.sandboxLauncherPath || '';
+  error.sandboxSid = meta.sandboxInfo?.sandbox_sid || error.sandboxSid || '';
+  error.sandboxBundleIdentifier = meta.sandboxInfo?.bundle_identifier || error.sandboxBundleIdentifier || '';
   error.openCodeBaseUrl = meta.baseUrl || error.openCodeBaseUrl || '';
   error.openCodePort = meta.port || error.openCodePort || 0;
   error.openCodeExitCode = meta.exitInfo?.code ?? error.openCodeExitCode;
@@ -199,26 +173,46 @@ async function waitForOpenCodeHealth({ baseUrl, authHeader, stderrBuffer, stdout
   });
 }
 
+// 停止监督启动器；原生启动器负责同步清理整棵沙箱进程树。
 function killChild(child) {
-  return new Promise((resolve) => {
-    if (!child || child.killed) {
+  return new Promise((resolve, reject) => {
+    if (!child || child.exitCode !== null || child.signalCode) {
       resolve();
       return;
     }
 
-    const timer = setTimeout(() => {
-      try { child.kill('SIGKILL'); } catch {}
-      resolve();
-    }, 2000);
+    let forceTimer = null;
+    let failureTimer = null;
+    let settled = false;
 
-    child.once('exit', () => {
-      clearTimeout(timer);
-      resolve();
-    });
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      if (forceTimer) clearTimeout(forceTimer);
+      if (failureTimer) clearTimeout(failureTimer);
+      child.removeListener('exit', handleExit);
+      callback(value);
+    };
 
-    try { child.kill('SIGTERM'); } catch {
-      clearTimeout(timer);
-      resolve();
+    const handleExit = () => finish(resolve);
+    child.once('exit', handleExit);
+
+    forceTimer = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch (error) {
+        finish(reject, new Error(`OpenCode 沙箱启动器强制终止失败：${error?.message || String(error)}`));
+        return;
+      }
+      failureTimer = setTimeout(() => {
+        finish(reject, new Error('OpenCode 沙箱启动器终止超时，无法确认子进程树已清理'));
+      }, 2000);
+    }, 5000);
+
+    try {
+      child.kill('SIGTERM');
+    } catch (error) {
+      finish(reject, new Error(`OpenCode 沙箱启动器终止失败：${error?.message || String(error)}`));
     }
   });
 }
@@ -228,20 +222,16 @@ async function closeAiProxy(aiProxy) {
   try { await aiProxy.close(); } catch {}
 }
 
+// 关闭失败必须向 Runtime 传播，避免把孤儿进程误报为已清理。
 async function closeOpenCodeSidecar(sidecar) {
-  if (!sidecar) return;
-  try {
-    if (typeof sidecar.close === 'function') {
-      await sidecar.close();
-    }
-  } catch {}
+  if (!sidecar || typeof sidecar.close !== 'function') return;
+  await sidecar.close();
 }
 
 async function startOpenCodeSidecar({
   app,
   configStore,
-  runtimeRoot,
-  workspaceDir,
+  sandboxService,
   timeoutMs,
   diagnostics,
   onStage,
@@ -249,30 +239,40 @@ async function startOpenCodeSidecar({
   getActivityContext,
   onExit,
 }) {
+  if (!sandboxService) {
+    throw new Error('OpenCode Server 禁止在没有原生沙箱服务时启动');
+  }
+
   const agentTimeoutMs = normalizeTimeoutMs(timeoutMs);
-  const opencodeBin = getBundledOpencodeBinaryPath(app);
-  ensureExecutable(opencodeBin);
-
-  fs.mkdirSync(runtimeRoot, { recursive: true });
-  fs.mkdirSync(workspaceDir, { recursive: true });
-  const toolEnvironment = ensureOpenCodeToolEnvironment({ app, workspaceDir });
-
-  const tempHome = path.join(runtimeRoot, 'home');
-  const configDir = path.join(tempHome, '.config', 'opencode');
-  const dataHome = path.join(tempHome, '.local', 'share');
-  const cacheHome = path.join(getAgentCacheDir(app), 'opencode-cache');
-  const opencodeConfigPath = path.join(runtimeRoot, 'opencode.json');
-
-  fs.mkdirSync(configDir, { recursive: true });
-  fs.mkdirSync(dataHome, { recursive: true });
-  fs.mkdirSync(cacheHome, { recursive: true });
-
+  const sandboxPaths = sandboxService.getPaths();
+  const sandboxResources = sandboxService.getResources();
+  const runtimeRoot = sandboxPaths.runtimeRoot;
+  const workspaceDir = sandboxPaths.workspaceDir;
+  const opencodeBin = sandboxResources.opencodePath;
+  let sandboxInfo = sandboxService.getInfo();
   let aiProxy = null;
   let child = null;
   const stderrBuffer = createStderrBuffer();
   const stdoutBuffer = createOutputBuffer();
 
   try {
+    emitStage(onStage, 'sandbox-prepare', 'running', '正在准备 OpenCode 原生沙箱');
+    sandboxInfo = sandboxService.prepare();
+    ensureExecutable(opencodeBin);
+    emitStage(onStage, 'sandbox-prepare', 'success', sandboxInfo.runtime_root, {
+      sandbox_type: sandboxInfo.sandbox_type,
+      runtime_root: sandboxInfo.runtime_root,
+    });
+
+    fs.mkdirSync(runtimeRoot, { recursive: true });
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    const toolEnvironment = ensureOpenCodeToolEnvironment({
+      app,
+      workspaceDir,
+      runtimeRoot,
+      bundledToolsBinDir: sandboxResources.bundledToolsBinDir,
+      nodeExecutablePath: sandboxResources.nodePath,
+    });
     emitStage(onStage, 'ai-proxy-start', 'running', '正在启动 OpenCode AI proxy');
     aiProxy = createAiServiceOpenAiProxy({
       app,
@@ -287,12 +287,12 @@ async function startOpenCodeSidecar({
 
     const currentConfig = configStore.load();
     emitStage(onStage, 'opencode-config-write', 'running', '正在写入 OpenCode 常驻配置');
-    const opencodeConfig = writeOpenCodeConfig(opencodeConfigPath, {
+    const opencodeConfig = writeOpenCodeConfig(sandboxPaths.openCodeConfigPath, {
       proxyBaseUrl: aiProxyInfo.baseUrl,
       contextLengthLimit: currentConfig.context_length_limit,
       timeoutMs: agentTimeoutMs,
     });
-    emitStage(onStage, 'opencode-config-write', 'success', opencodeConfigPath);
+    emitStage(onStage, 'opencode-config-write', 'success', sandboxPaths.openCodeConfigPath);
 
     const port = await findFreePort();
     const username = 'yibiao';
@@ -309,17 +309,13 @@ async function startOpenCodeSidecar({
         runtimeRoot,
         baseUrl,
         port,
+        sandboxInfo,
       },
     };
 
-    const env = applyOpenCodeToolEnvironment(buildMinimalChildEnv({
-      HOME: tempHome,
-      USERPROFILE: tempHome,
-      XDG_CONFIG_HOME: path.join(tempHome, '.config'),
-      XDG_DATA_HOME: dataHome,
-      XDG_CACHE_HOME: cacheHome,
-      OPENCODE_CONFIG: opencodeConfigPath,
-      OPENCODE_CONFIG_DIR: configDir,
+    const env = applyOpenCodeToolEnvironment(sandboxService.createEnvironment({
+      OPENCODE_CONFIG: sandboxPaths.openCodeConfigPath,
+      OPENCODE_CONFIG_DIR: sandboxPaths.openCodeConfigDir,
       OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig),
       OPENCODE_PERMISSION: JSON.stringify(opencodeConfig.permission),
       OPENCODE_SERVER_USERNAME: username,
@@ -331,21 +327,22 @@ async function startOpenCodeSidecar({
       YIBIAO_OPENCODE_PROXY_TOKEN: aiProxyInfo.token,
     }), toolEnvironment);
 
-    emitStage(onStage, 'opencode-server-start', 'running', `正在启动 OpenCode Server：${baseUrl}`);
-    child = spawn(opencodeBin, [
-      'serve',
-      '--pure',
-      '--hostname', '127.0.0.1',
-      '--port', String(port),
-    ], {
+    emitStage(onStage, 'opencode-server-start', 'running', `正在沙箱中启动 OpenCode Server：${baseUrl}`);
+    child = sandboxService.spawnSandboxed({
+      executablePath: opencodeBin,
+      args: [
+        'serve',
+        '--pure',
+        '--hostname', '127.0.0.1',
+        '--port', String(port),
+      ],
       cwd: workspaceDir,
       env,
-      windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    child.stdout.on('data', (chunk) => stdoutBuffer.push(chunk));
-    child.stderr.on('data', (chunk) => stderrBuffer.push(chunk));
+    child.stdout?.on('data', (chunk) => stdoutBuffer.push(chunk));
+    child.stderr?.on('data', (chunk) => stderrBuffer.push(chunk));
 
     child.once('error', (error) => {
       childState.spawnError = error;
@@ -356,8 +353,8 @@ async function startOpenCodeSidecar({
     child.once('exit', (code, signal) => {
       childState.exitInfo = { code, signal };
       if (!childState.healthPassed && code !== 0) {
-        emitStage(onStage, 'opencode-server-start', 'error', `OpenCode 进程退出：code=${code ?? 'null'} signal=${signal || 'null'}`);
-        console.warn('[opencode] server exited', {
+        emitStage(onStage, 'opencode-server-start', 'error', `OpenCode 沙箱进程退出：code=${code ?? 'null'} signal=${signal || 'null'}`);
+        console.warn('[opencode] sandbox launcher exited', {
           code,
           signal,
           stdout: stdoutBuffer.tail(4000),
@@ -385,6 +382,7 @@ async function startOpenCodeSidecar({
       aiProxyPort: aiProxyInfo.port,
       workspaceDir,
       runtimeRoot,
+      sandboxInfo: { ...sandboxInfo, launcher_pid: child.pid || 0 },
       child,
       pid: child.pid,
       requestLog: [],
@@ -409,6 +407,7 @@ async function startOpenCodeSidecar({
       opencodeBin,
       workspaceDir,
       runtimeRoot,
+      sandboxInfo,
       stderrBuffer,
       stdoutBuffer,
     });

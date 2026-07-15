@@ -204,6 +204,48 @@ export interface LicenseOfflineActivationResult {
   status: LicenseRuntimeStatus;
 }
 
+export interface AgentSandboxBoundaryProbeItem {
+  id: string;
+  label: string;
+  path: string;
+  internal?: boolean;
+  exists?: boolean;
+  allowed: boolean;
+  skipped?: boolean;
+  error_code?: string;
+  error_message?: string;
+}
+
+export interface AgentSandboxBoundaryProbe {
+  success: boolean;
+  checked_at: string;
+  sandbox_type: string;
+  runtime_root: string;
+  checked_count: number;
+  blocked_count: number;
+  skipped_count: number;
+  items: AgentSandboxBoundaryProbeItem[];
+  stdout_tail?: string;
+  stderr_tail?: string;
+}
+
+export interface AgentSandboxInfo {
+  sandbox_type: string;
+  profile: 'production' | 'development' | string;
+  prepared: boolean;
+  runtime_root: string;
+  launcher_path: string;
+  launcher_pid: number;
+  opencode_path: string;
+  node_path: string;
+  bundled_tools_bin_dir: string;
+  sandbox_sid?: string;
+  bundle_identifier?: string;
+  app_bundle_path?: string;
+  diagnostics?: unknown[];
+  acl?: unknown;
+}
+
 export interface AgentRuntimeStatus {
   phase: AgentRuntimePhase;
   healthy: boolean;
@@ -226,6 +268,7 @@ export interface AgentRuntimeStatus {
     queued: number;
     limit: number;
   };
+  sandbox?: AgentSandboxInfo;
   opencode?: {
     pid: number;
     base_url?: string;
@@ -334,6 +377,13 @@ export interface AgentSelfCheckDiagnostics {
   opencode_stdout_tail?: string;
   opencode_stderr_tail?: string;
   opencode_request_log?: unknown[];
+  sandbox_type?: string;
+  sandbox_root?: string;
+  sandbox_launcher_path?: string;
+  sandbox_sid?: string;
+  sandbox_bundle_identifier?: string;
+  sandbox_diagnostics?: unknown[];
+  sandbox_boundary_probe?: AgentSandboxBoundaryProbe | null;
 }
 
 export interface AgentSelfCheckEnvironmentSnapshot {
@@ -358,6 +408,9 @@ export interface AgentSelfCheckResult {
   output_path: string;
   output_content?: string;
   opencode_binary_path: string;
+  sandbox_type?: string;
+  sandbox_info?: AgentSandboxInfo;
+  sandbox_boundary_probe?: AgentSandboxBoundaryProbe | null;
   conclusion?: string;
   model_config?: Record<string, unknown>;
   environment?: AgentSelfCheckEnvironmentSnapshot | null;
