@@ -2320,3 +2320,46 @@
 - 三个独立前向测试分别验证限定范围、路径未知和页面无数据行为，结果全部符合 Skill 规则。
 - 最终 UTF-8 检查、三脚本语法、当前手册 10 篇/14 图完整校验和规划文件 diff 检查全部通过。
 - 临时测试目录已删除，由测试启动的发行版进程已正常关闭。
+
+## Current Task: OpenCode 原生沙箱隔离小原型
+
+### Goal
+在不接入现有业务、不修改 OpenCode、不增加第三方运行时的前提下，验证 Windows AppContainer 与 macOS App Sandbox 能否把项目内置 OpenCode 的文件可见范围限制在独立运行目录内，并阻断对宿主用户配置、全局 Skill 和项目外文件的读取。
+
+### Phases
+- [completed] 1. 核对项目内置 OpenCode 的发行结构，确定原型目录、启动参数与隔离探针。
+- [completed] 2. 实现 Windows AppContainer 最小启动器和构建/验证脚本。
+- [completed] 3. 在当前 Windows 环境运行原型，验证原生文件边界并定位 OpenCode 项目命令的兼容阻塞。
+- [completed] 4. 实现 macOS App Sandbox 最小启动器、权限声明和 ad-hoc 签名脚本。
+- [completed] 5. 完成静态检查、使用说明和结果复盘，明确仍需 macOS 真机验证的边界。
+
+### Decisions
+- 原型独立放置，不修改 Electron 启动链路、现有 OpenCode 服务或产品配置。
+- Windows 只使用系统 AppContainer API；macOS 只使用系统 App Sandbox 与系统签名工具，不引入容器、虚拟机、XPC、App Group 或第三方沙箱依赖。
+- 原型只验证文件系统隔离，先运行无需联网的 OpenCode 调试命令，不为尚未验证的网络场景增加能力声明。
+- 所有 HOME/XDG/临时目录均指向沙箱内部；沙箱创建失败时直接失败，不回退为普通进程。
+- Windows 不需要打包证书；macOS 使用 ad-hoc 签名验证沙箱权限，不依赖 Developer ID 证书或公证。
+- macOS 通过 `NSHomeDirectory()` 获取系统分配的容器目录，并只在 `execve()` 时给 OpenCode 传入明确的最小环境，不依赖 `clearenv()` 或继承宿主环境。
+
+### Errors Encountered
+| Error | Attempt | Resolution |
+| --- | --- | --- |
+| `apply_patch` 因本地工作区沙箱刷新异常无法读取文件 | 三次尝试写入任务记录 | 改用 Git 标准补丁应用并在每次写入后审核 diff。 |
+| PowerShell 直接把 `foreach` 语句结果接到管道时触发空管道解析错误 | 两次只读环境探测 | 先把结果收集到数组，再统一输出。 |
+| Windows PowerShell 5.1 把原生进程的标准错误诊断行提升为终止错误 | Windows 原型首次真实运行 | 在探针调用局部使用 `Continue` 捕获标准错误和退出码，恢复外层严格错误策略后再断言。 |
+| OpenCode 在沙箱内的非 Git 工作区回退到全局项目并对 `C:\\` 执行 `lstat`，被 AppContainer 拒绝 | Windows 原型第二次运行 | 在容器工作区写入最小 Git 元数据，使 OpenCode 识别项目边界；不放宽盘符根目录权限。 |
+| 仅写入 `.git` 目录和基础元数据后，OpenCode 仍回退到全局项目 | Windows 原型第三次运行 | 上游 `Git.find()` 还要求执行 `git rev-parse --show-toplevel` 与 `--git-common-dir`；原型增加只响应这两条命令的容器内探针，不引入完整 Git。 |
+| 零上下文补丁在同一未跟踪文件内多次插入后发生位置偏移，导致 C# 代码落入语句和数组内部 | Windows 原型第四次运行前编译 | 按实际内容修复错位，后续在创建 AppContainer 前分别执行 PowerShell 解析和 C# 编译。 |
+| OpenCode `FSUtil.up()` 即使已在工作区找到 `.git`，仍继续扫描到盘符根；根目录探测被拒绝后整次结果被丢弃 | Windows 原型项目命令验证 | 不增加根目录 ACL，不保留假 Git；将原生边界与 OpenCode 兼容性分开验证，并把当前版本适配列为正式接入前置条件。 |
+| macOS 启动器最初在自身进程中调用 `clearenv()` 后逐项重设变量，平台行为和错误处理都偏重 | macOS 原型复核 | 改为构造固定 `envp` 并在执行 OpenCode 时一次传入，启动器探针不再修改自身环境。 |
+| Windows PowerShell 5.1 将含中文的新文件补丁通过原生管道输出时编码为问号 | 首次创建原型 README | 删除本次损坏文件，显式设置无 BOM UTF-8 输出后重建，并用 Unicode 码点和损坏字符扫描复核。 |
+| 最后三项只读复核首次等待权限审批超时 | 最终验证 | 按允许规则重试一次后全部通过；该超时与原型代码无关。 |
+
+### Validation
+- Windows 完整验证退出码为 0：独立 SID 和目录创建成功，内部标记可读，仓库 `AGENTS.md` 被拒绝。
+- OpenCode `debug paths` 的配置、数据、缓存和状态路径均位于 AppContainer 专属目录。
+- OpenCode `debug skill` 稳定复现 `EPERM: lstat 'C:\\'`，与固定版本向上扫描源码一致。
+- 验证结束后 AppContainer profile 路径不存在，测试容器已清理。
+- macOS `verify.sh` 已通过 Git Bash 语法检查，三个 plist/entitlements 文件均通过 XML 解析。
+- 原型 README 已确认是有效 UTF-8 中文，不含替换字符或连续问号损坏。
+- 当前没有 macOS 执行环境，因此 Objective-C 编译、ad-hoc 签名和真实 App Sandbox 文件拒绝仍需在 macOS 真机验证。

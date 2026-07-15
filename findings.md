@@ -312,3 +312,22 @@
 - 前向测试确认限定文本模型配置时目标为 1 篇 Markdown、2 张原图和 2 张标注图；完整手册只读扫描通过，前后聚合哈希一致。
 - 前向测试确认路径未知时会请求用户提供发行版 EXE 并暂停；标书查重无文件和结果时会要求用户先自行完成导入与查重，再次调用 Skill，且本次不修改文件。
 - 个人 Skill 最终包含 7 个必要文件：主说明、界面元数据、2 个参考文件和 3 个 PowerShell 脚本；未添加 README、图标或无关资产。
+- OpenCode 隔离失效的根因不是单个 Skill 开关，而是进程仍拥有宿主用户身份下的普通文件读取权限；HOME/XDG 重定向只能改变首选配置路径，不能形成文件系统边界。
+- 项目内置 OpenCode v1.17.8 在非版本库工作区可能落入全局项目，并沿工作区父目录发现配置、指令和 Skill；当前工作区位于用户 AppData 下，使宿主用户目录进入发现链路。
+- 本次原型的最小判定标准是：沙箱内部文件可读写、明确的沙箱外探针不可读、OpenCode 调试输出不出现宿主全局 Skill。仅改变环境变量不计为隔离成功。
+- Windows AppContainer 可用于未打包桌面进程，不以 MSIX 或代码签名为前提；macOS App Sandbox 权限必须写入代码签名，但可先用 ad-hoc 签名做本地技术验证，Developer ID 只影响分发信任体验。
+- 内置 Windows OpenCode 是单个约 165 MB 的自包含可执行文件；原型可把它复制进 AppContainer 自有目录后启动，无需修改安装目录 ACL。
+- OpenCode 自带 `debug file read`、`debug paths` 和 `debug skill`，可以直接作为隔离探针，不需要再编写一个模拟文件读取的测试程序。
+- Windows PowerShell 5.1 在外层 `ErrorActionPreference=Stop` 时会把原生进程标准错误流包装成终止错误；验证函数必须局部降为 `Continue`，才能同时保留预期失败探针的输出和真实退出码。
+- AppContainer 中 `debug paths` 已成功运行且所有 OpenCode 数据路径都位于容器目录；随后相对文件读取在项目初始化阶段因 `lstat C:\\` 返回 `EPERM`，验证了 OpenCode 的全局项目根目录回退与真实文件隔离之间存在兼容冲突。
+- 解决兼容冲突的最小方向是修正 OpenCode 向上遍历的错误处理：遇到不可访问的父目录时停止，或保留此前已找到的项目结果；不应给盘符根目录追加权限。
+- OpenCode v1.17.8 的 `Git.find()` 虽然还会调用两条 `git rev-parse`，但当前失败发生在更早的祖先目录扫描阶段，因此静态 `.git` 和 Git 命令探针都无法形成隔离边界。
+- 试验过的假 `.git` 和最小 Git 探针已经从最终原型删除；最终原型只保留原生沙箱边界验证和当前 OpenCode 兼容性复现。
+- 固定版本源码确认 `FSUtil.up()` 不会在首次命中后停止，而是逐级扫描到文件系统根；`Git.find()` 对整个向上扫描做一次总 catch，所以任一不可访问祖先会让已找到的 `.git` 结果一并丢失，测试 Git 探针根本不会执行。
+- Windows 实测的 AppContainer 文件边界有效：容器内 `inside.txt` 可读，仓库 `AGENTS.md` 明确返回 `Access is denied`；OpenCode 的 HOME、XDG、日志和缓存路径也全部位于容器目录。
+- Windows 原型结束后固定 AppContainer profile 目录不存在，说明 `finally` 清理成功，未残留约 165 MB 的 OpenCode 副本。
+- 结论边界：简单 AppContainer 足以完成数据隔离，但 OpenCode v1.17.8 项目型命令需要先修正向上扫描错误处理；给 `C:\` 增加 AppContainer ACL 或保留假 Git 都不符合最小、稳定设计。
+- macOS 原型主启动器只声明 App Sandbox，内置 OpenCode 只声明 App Sandbox 与继承权限；没有文件例外、网络能力、App Group 或 XPC。
+- macOS 使用 Apple 明确规定的 `NSHomeDirectory()` 获取容器主目录；OpenCode 子进程通过固定 `envp` 接收 HOME/XDG/TMPDIR，既不继承宿主配置变量，也不需要 `clearenv()`。
+- macOS 权限需要写入代码签名，但原型使用 `codesign --sign -` 的 ad-hoc 签名即可本机验证，不需要 Developer ID；分发时的 Gatekeeper 与公证问题不属于本次隔离原型。
+- 当前 Windows 环境只能完成 Bash 语法和 plist XML 静态检查；macOS 的 Objective-C 编译、签名加载和真实文件拒绝必须在真机上验证，当前不能宣称已经通过。

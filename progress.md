@@ -273,3 +273,14 @@
 - 限定范围隔离验证通过：范围内阻塞问题 0、范围外问题 1，完整检查正确以退出码 1 失败；缺失窗口场景也正确阻塞。元数据断言仍有一项失败，正在核对实际字段。
 - 元数据断言已改用 ASCII Unicode 转义并通过；三个独立前向测试全部通过，覆盖限定范围、发行版路径未知和业务页面无数据三种关键行为。
 - `yibiao-user-manual` 实现完成：官方 Skill 校验、UTF-8、3 个脚本语法、当前手册 10 篇/14 图、限定范围、缺失路径、无数据和真实窗口截图/标注测试全部通过；临时文件已清理，测试发行版已关闭。
+- 开始 OpenCode 原生沙箱隔离小原型：已确认范围仅为独立技术验证，不接入产品链路；Windows 使用 AppContainer，macOS 使用 App Sandbox + ad-hoc 签名，不增加第三方依赖或普通进程回退。
+- 已核对内置 OpenCode 发行结构和调试接口：Windows 版本为单个自包含 EXE，`debug file read`、`debug paths`、`debug skill` 足以直接验证文件访问边界与全局 Skill 可见性。
+- 当前普通工作区命令受底层沙箱刷新异常影响会挂起，`apply_patch` 也无法读取文件；只读探测已改为经批准的沙箱外执行，文件写入改用 Git 标准补丁并逐次审核。
+- Windows 启动器已通过 C# 编译，验证脚本通过 PowerShell 语法检查；首次真实运行成功创建 AppContainer 并得到包 SID，但在 OpenCode 启动前被 PowerShell 5.1 的标准错误流提升行为中断，正在修正测试捕获逻辑。
+- Windows 第二次真实运行中，沙箱内 `debug paths` 成功且全部路径位于 AppContainer；内部文件探针在 OpenCode 项目初始化阶段因其访问 `C:\\` 被拒绝。下一步用容器内最小 Git 工作区避免全局项目回退，不增加盘符权限。
+- Windows 第三次运行确认静态 `.git` 元数据不足：OpenCode 上游项目识别还依赖两条 `git rev-parse`。已新增容器内最小 Git 探针，仅用于让本原型越过已知项目根回退并继续验证 AppContainer 文件边界。
+- Windows 精简原型验证通过：OpenCode `debug paths` 全部落入 AppContainer，系统 cmd 可读取容器内标记且无法读取仓库文件；`debug skill` 稳定复现 `EPERM: lstat 'C:\\'`。测试 profile 已自动删除，无残留容器目录。
+- 已移除无效的最小 Git 探针和假 `.git` 元数据；Windows 结论为“原生隔离有效、OpenCode v1.17.8 项目命令存在明确兼容阻塞”，开始实现 macOS 同构原型。
+- macOS 同构原型已完成：最小启动器通过 `NSHomeDirectory()` 使用系统容器，OpenCode 仅继承 App Sandbox，并以 ad-hoc 签名嵌入临时无界面应用包。
+- macOS `verify.sh` 通过 Git Bash 语法检查，三个 plist/entitlements 文件通过 XML 解析；由于当前没有 macOS 和对应二进制，真实编译、签名和隔离执行仍待真机。
+- OpenCode 原生沙箱小原型完成：Windows 完整验证再次退出 0，内部标记可读、仓库文件拒绝、测试容器无残留；说明文档已用 UTF-8 重建并复核。
